@@ -3,4 +3,7 @@ __pycache__/
 config.json
 chats.json
 _remote_uploads/
+build/
+dist/
+*.spec
 *.pyc

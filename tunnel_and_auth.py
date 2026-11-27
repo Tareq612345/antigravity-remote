@@ -18,7 +18,7 @@ SUPABASE_ANON_KEY = (
 TRYCLOUDFLARE_RE = re.compile(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com")
 
 
-def find_cloudflared() -> str | None:
+def find_cloudflared(data_dir: Path | None = None) -> str | None:
     found = shutil.which("cloudflared")
     if found:
         return found
@@ -27,30 +27,49 @@ def find_cloudflared() -> str | None:
         Path(r"C:\Program Files\cloudflared\cloudflared.exe"),
         Path.home() / "AppData" / "Local" / "Microsoft" / "WinGet" / "Links" / "cloudflared.exe",
     ]
+    if data_dir:
+        candidates.insert(0, data_dir / "cloudflared.exe")
     for c in candidates:
         if c.exists():
             return str(c)
     return None
 
 
+def ensure_cloudflared(data_dir: Path) -> str | None:
+    exe = find_cloudflared(data_dir)
+    if exe:
+        return exe
+    dest = data_dir / "cloudflared.exe"
+    url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
+    try:
+        print("[Tunnel] Downloading cloudflared...")
+        with requests.get(url, stream=True, timeout=60) as r:
+            r.raise_for_status()
+            with dest.open("wb") as f:
+                for chunk in r.iter_content(chunk_size=1024 * 128):
+                    if chunk:
+                        f.write(chunk)
+        return str(dest)
+    except Exception as exc:
+        print(f"[Tunnel] Failed to download cloudflared: {exc}")
+        return None
+
+
 class TunnelManager:
     """Runs cloudflared quick tunnel and syncs the public HTTPS URL to Supabase."""
 
-    def __init__(self, local_port: int = 8765) -> None:
+    def __init__(self, local_port: int = 8765, data_dir: Path | None = None) -> None:
         self.local_port = local_port
+        self.data_dir = data_dir or (Path.home() / ".antigravity-remote")
         self.proc: subprocess.Popen[str] | None = None
         self.public_url: str | None = None
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
     def start(self, on_url_ready=None) -> None:
-        exe = find_cloudflared()
-        if not exe:
-            print("[Tunnel] cloudflared not found; running LAN-only.")
-            return
         self._stop_event.clear()
         self._thread = threading.Thread(
-            target=self._run_loop, args=(exe, on_url_ready), daemon=True
+            target=self._run_loop, args=(on_url_ready,), daemon=True
         )
         self._thread.start()
 
@@ -59,7 +78,12 @@ class TunnelManager:
         if self.proc and self.proc.poll() is None:
             self.proc.terminate()
 
-    def _run_loop(self, exe: str, on_url_ready) -> None:
+    def _run_loop(self, on_url_ready) -> None:
+        exe = ensure_cloudflared(self.data_dir)
+        if not exe:
+            print("[Tunnel] cloudflared unavailable; running LAN-only.")
+            return
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         self.proc = subprocess.Popen(
             [exe, "tunnel", "--url", f"http://127.0.0.1:{self.local_port}"],
             stdout=subprocess.PIPE,
@@ -67,6 +91,7 @@ class TunnelManager:
             text=True,
             encoding="utf-8",
             errors="replace",
+            creationflags=creationflags,
         )
         assert self.proc.stdout is not None
         for line in self.proc.stdout:
