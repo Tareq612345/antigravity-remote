@@ -264,22 +264,31 @@ class HubState:
 hub = HubState()
 
 
-def sync_tunnel_to_supabase(public_url: str | None = None) -> bool:
+def sync_tunnel_to_supabase(public_url: str | None = None, access_token: str | None = None) -> bool:
     url = public_url or tunnel_manager.public_url
-    rt = config.get("supabase_refresh_token")
-    if not url or not rt:
+    if not url:
         return False
-    sess = sb_auth.refresh_session(rt)
-    if not sess or not sess.get("access_token"):
-        return False
-    config["supabase_refresh_token"] = sess.get("refresh_token", rt)
-    user = sess.get("user") or sb_auth.get_user(sess["access_token"]) or {}
+    tok = access_token
+    user: dict[str, Any] = {}
+    if not tok:
+        rt = config.get("supabase_refresh_token")
+        if not rt:
+            return False
+        sess = sb_auth.refresh_session(rt)
+        if not sess or not sess.get("access_token"):
+            audit_log("supabase_sync_failed", "refresh_token_expired")
+            return False
+        config["supabase_refresh_token"] = sess.get("refresh_token", rt)
+        tok = sess["access_token"]
+        user = sess.get("user") or {}
+    if not user:
+        user = sb_auth.get_user(tok) or {}
     if user.get("id") and user.get("email"):
         config["owner_user_id"] = user["id"]
         config["owner_email"] = user["email"]
         save_config(config)
         ok = sb_auth.upsert_device(
-            sess["access_token"],
+            tok,
             user["id"],
             user["email"],
             url,
@@ -477,7 +486,7 @@ async def pc_link(request: Request, body: PcLinkBody) -> JSONResponse:
     config["owner_user_id"] = user["id"]
     config["owner_email"] = user["email"]
     save_config(config)
-    synced = sync_tunnel_to_supabase()
+    synced = sync_tunnel_to_supabase(access_token=body.access_token)
     audit_log("pc_link_success", f"email={user['email']} synced={synced}")
     resp = JSONResponse({"email": user["email"], "synced": synced})
     resp.delete_cookie("ag_pair")
