@@ -257,7 +257,7 @@ cd /d "C:\Projects\antigravity-remote"
 **صفحة الربط تقول "Invalid or expired pairing code"**
 الكود صالح 5 دقائق ويُستخدم مرة واحدة. افتح `http://127.0.0.1:8765/pc-login` من الجهاز مرة أخرى للحصول على كود جديد.
 
-**صفحة `/pc-login` ترجع 403 "only allowed from localhost"**
+**صفحة `/pc-login` ترجع 403 "PC pairing is only allowed from localhost"**
 أنت تفتحها من خلال النفق. تعمل فقط من الجهاز نفسه.
 
 **المنفذ 8765 مستخدم بالفعل**
