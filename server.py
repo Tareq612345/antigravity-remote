@@ -86,7 +86,11 @@ def load_or_create_config() -> dict[str, Any]:
         cfg.setdefault("agy_path", DEFAULT_AGY_PATH)
         cfg.setdefault("agy_mode", DEFAULT_AGY_MODE)
         cfg.setdefault("bind_host", "127.0.0.1")
-        cfg.setdefault("allowed_origins", DEFAULT_ALLOWED_ORIGINS)
+        origins = list(cfg.get("allowed_origins") or [])
+        for o in DEFAULT_ALLOWED_ORIGINS:
+            if o not in origins:
+                origins.append(o)
+        cfg["allowed_origins"] = origins
         cfg.setdefault("allowed_workspaces", [cfg.get("workspace", str(Path.home() / "Desktop"))])
         return cfg
     default_ws = str(Path.home() / "Desktop")
