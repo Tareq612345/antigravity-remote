@@ -98,6 +98,14 @@ class SecurityTestSuite(unittest.TestCase):
         cli.invalidate("t1")
         self.assertNotIn("t1", cli._cache)
 
+    def test_models_and_effort_validation(self) -> None:
+        r = self.client.post("/api/model", json={"model": "gemini-4-hydrogen-medium", "effort": "high"}, headers=self.hdr)
+        self.assertEqual(r.status_code, 200)
+        r_bad = self.client.post("/api/model", json={"model": "bad;rm", "effort": "high"}, headers=self.hdr)
+        self.assertEqual(r_bad.status_code, 400)
+        # Reset back to default
+        self.client.post("/api/model", json={"model": "", "effort": ""}, headers=self.hdr)
+
 
 if __name__ == "__main__":
     unittest.main()

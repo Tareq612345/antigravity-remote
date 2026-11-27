@@ -97,7 +97,37 @@
     .q-badge { display: inline-block; font-size: 11px; color: #fde68a; margin-top: 4px; }
     .meta-box { font-size: 12px; color: var(--muted); background: var(--sidebar); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; direction: ltr; text-align: left; }
 
-    .composer-wrap { padding: 8px 14px 16px; }
+    .composer-wrap { padding: 8px 14px 16px; position: relative; }
+    .model-popover {
+      display: none; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+      width: calc(100% - 28px); max-width: 440px; margin-bottom: 8px;
+      background: #1f1f1f; border: 1px solid var(--border); border-radius: 16px;
+      padding: 12px; box-shadow: 0 12px 32px rgba(0,0,0,0.6); z-index: 40;
+      max-height: 65dvh; overflow-y: auto; flex-direction: column; gap: 10px;
+    }
+    .model-popover.open { display: flex; }
+    .model-btn {
+      background: transparent; border: none; color: var(--muted); font-size: 12.5px;
+      padding: 4px 10px; border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+    }
+    .model-btn:hover { background: rgba(255,255,255,0.08); color: var(--text); }
+    .model-item {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      padding: 8px 10px; border-radius: 10px; cursor: pointer; font-size: 13px; border: none;
+      background: transparent; color: var(--text); width: 100%; text-align: start;
+    }
+    .model-item:hover { background: rgba(255,255,255,0.07); }
+    .model-item.active { background: rgba(16, 163, 127, 0.18); color: #6ee7b7; }
+    .effort-row { display: flex; gap: 6px; flex-wrap: wrap; }
+    .effort-chip {
+      padding: 5px 10px; border-radius: 8px; font-size: 12px; cursor: pointer;
+      border: 1px solid var(--border); background: var(--bg); color: var(--muted);
+    }
+    .effort-chip.active { border-color: var(--ok); color: #6ee7b7; background: rgba(16, 163, 127, 0.12); }
+    .usage-box {
+      border-top: 1px solid var(--border); padding-top: 10px; font-size: 12px; color: var(--muted);
+      display: flex; flex-direction: column; gap: 4px; direction: ltr; text-align: left;
+    }
     .composer-inner { max-width: 760px; margin: 0 auto; background: var(--composer); border-radius: 26px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; border: 1px solid rgba(255, 255, 255, 0.08); }
     .attach-bar { display: none; flex-wrap: wrap; gap: 6px; padding: 2px 8px; }
     .attach-bar.open { display: flex; }
@@ -190,6 +220,24 @@
         </div>
       </div>
       <div class="composer-wrap">
+        <div id="modelPopover" class="model-popover">
+          <div style="font-size:12px;color:var(--muted);font-weight:600;">Model</div>
+          <div id="modelsList" style="display:flex;flex-direction:column;gap:2px;"></div>
+          <div style="border-top:1px solid var(--border);padding-top:8px;">
+            <div style="font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px;">Thinking Effort</div>
+            <div id="effortRow" class="effort-row">
+              <button class="effort-chip" onclick="selectEffort('')">Auto</button>
+              <button class="effort-chip" onclick="selectEffort('low')">Low</button>
+              <button class="effort-chip" onclick="selectEffort('medium')">Medium</button>
+              <button class="effort-chip" onclick="selectEffort('high')">High</button>
+              <button class="effort-chip" onclick="selectEffort('xhigh')">Extra High</button>
+            </div>
+          </div>
+          <div id="usageBox" class="usage-box">
+            <strong>Usage (This Session)</strong>
+            <span id="usageSummary">Turns: 0 | Tokens: 0</span>
+          </div>
+        </div>
         <div class="composer-inner">
           <div id="attachBar" class="attach-bar"></div>
           <div class="composer-row">
@@ -198,6 +246,9 @@
             <textarea id="promptInput" rows="1" placeholder="Ask Antigravity..."></textarea>
             <button id="stopBtn" class="send-btn" style="display:none;" onclick="stopTurn()">■</button>
             <button id="sendBtn" class="send-btn" onclick="sendPrompt()">↑</button>
+          </div>
+          <div style="display:flex;align-items:center;padding:0 6px 2px;">
+            <button id="modelBtn" class="model-btn" onclick="toggleModelMenu()">⚡ Default Model ⌄</button>
           </div>
         </div>
       </div>
@@ -596,7 +647,83 @@
         document.getElementById("sleepStateText").textContent = `${txt} | Screen: ${keepDisplayOn ? "On" : "Off OK"}`;
         if (st.workspace) document.getElementById("workspaceInput").value = st.workspace;
         document.getElementById("modeSelect").value = st.agy_mode || "accept-edits";
+        updateModelBadge(st.agy_model || "", st.agy_effort || "", st.usage || null);
       } catch {}
+    }
+
+    let cachedModels = [];
+    let currentModelId = "";
+    let currentEffort = "";
+
+    function toggleModelMenu() {
+      const pop = document.getElementById("modelPopover");
+      const opening = !pop.classList.contains("open");
+      pop.classList.toggle("open", opening);
+      if (opening) loadModels();
+    }
+
+    async function loadModels() {
+      if (!SERVER_URL) return;
+      try {
+        const data = await api("/api/models");
+        cachedModels = data.models || [];
+        currentModelId = data.current_model || "";
+        currentEffort = data.current_effort || "";
+        renderModelsPopover(data.usage || null);
+      } catch {}
+    }
+
+    function renderModelsPopover(usage) {
+      const list = document.getElementById("modelsList");
+      list.innerHTML = "";
+      const all = [{ id: "", name: "Default (Account Auto)" }, ...cachedModels];
+      all.forEach(m => {
+        const btn = document.createElement("button");
+        btn.className = "model-item" + (m.id === currentModelId ? " active" : "");
+        btn.innerHTML = `<span>${m.name}</span><span style="font-size:11px;color:var(--muted);">${m.id === currentModelId ? "✓" : ""}</span>`;
+        btn.onclick = () => selectModel(m.id);
+        list.appendChild(btn);
+      });
+      document.querySelectorAll(".effort-chip").forEach(ch => {
+        const val = ch.getAttribute("onclick").match(/'([^']*)'/)[1];
+        ch.classList.toggle("active", val === currentEffort);
+      });
+      updateModelBadge(currentModelId, currentEffort, usage);
+    }
+
+    function updateModelBadge(mid, eff, usage) {
+      currentModelId = mid;
+      currentEffort = eff;
+      const found = cachedModels.find(m => m.id === mid);
+      const label = found ? found.name : (mid || "Default Model");
+      const effTxt = eff ? ` · ${eff}` : "";
+      document.getElementById("modelBtn").textContent = `⚡ ${label}${effTxt} ⌄`;
+      if (usage) {
+        const lines = [`Turns: ${usage.turns || 0} | Total: ${(usage.total_tokens || 0).toLocaleString()} tok`];
+        lines.push(`In: ${(usage.input_tokens || 0).toLocaleString()} · Out: ${(usage.output_tokens || 0).toLocaleString()} · Think: ${(usage.thinking_tokens || 0).toLocaleString()}`);
+        document.getElementById("usageSummary").textContent = lines.join("\n");
+      }
+    }
+
+    async function selectModel(mid) {
+      currentModelId = mid;
+      await api("/api/model", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: currentModelId, effort: currentEffort })
+      });
+      renderModelsPopover(null);
+      document.getElementById("modelPopover").classList.remove("open");
+    }
+
+    async function selectEffort(eff) {
+      currentEffort = eff;
+      await api("/api/model", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: currentModelId, effort: currentEffort })
+      });
+      renderModelsPopover(null);
     }
 
     async function saveWorkspace() {

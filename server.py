@@ -94,6 +94,8 @@ def load_or_create_config() -> dict[str, Any]:
         "token": secrets.token_urlsafe(24),
         "agy_path": DEFAULT_AGY_PATH,
         "agy_mode": DEFAULT_AGY_MODE,
+        "agy_model": "",
+        "agy_effort": "",
         "workspace": default_ws,
         "allowed_workspaces": [default_ws],
         "allowed_origins": DEFAULT_ALLOWED_ORIGINS,
@@ -174,6 +176,16 @@ class HubState:
         self.ide_mirror_id: str | None = None
         self.pairing_codes: dict[str, tuple[str, float]] = {}
         self.active_ws_connections: int = 0
+        self.models_cache: tuple[float, list[dict[str, str]]] | None = None
+        self.usage_stats: dict[str, Any] = {
+            "turns": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "thinking_tokens": 0,
+            "cache_read_tokens": 0,
+            "total_tokens": 0,
+            "by_model": {},
+        }
 
     def issue_pairing_code(self) -> tuple[str, str]:
         now = time.monotonic()
@@ -480,6 +492,9 @@ async def get_status(request: Request) -> JSONResponse:
     st = sleep_manager.status()
     payload: dict[str, Any] = {
         "agy_mode": config.get("agy_mode", DEFAULT_AGY_MODE),
+        "agy_model": config.get("agy_model", ""),
+        "agy_effort": config.get("agy_effort", ""),
+        "usage": hub.usage_stats,
         "busy": hub.busy,
         "queue_count": len(hub.queue),
         "sleep": {
@@ -494,6 +509,62 @@ async def get_status(request: Request) -> JSONResponse:
         payload["owner_email"] = config.get("owner_email")
         payload["tunnel_url"] = tunnel_manager.public_url
     return JSONResponse(payload)
+
+
+@app.get("/api/models")
+async def get_models(request: Request) -> JSONResponse:
+    verify_request(request)
+    now = time.monotonic()
+    models: list[dict[str, str]] = []
+    if hub.models_cache and now < hub.models_cache[0]:
+        models = hub.models_cache[1]
+    else:
+        agy_exe = config.get("agy_path", DEFAULT_AGY_PATH)
+        if Path(agy_exe).exists():
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    agy_exe,
+                    "models",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=getattr(asyncio.subprocess, "CREATE_NO_WINDOW", 0x08000000),
+                )
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=12.0)
+                for line in out.decode("utf-8", errors="replace").splitlines():
+                    if "\t" in line:
+                        mid, mname = line.split("\t", 1)
+                        models.append({"id": mid.strip(), "name": mname.strip()})
+                if models:
+                    hub.models_cache = (now + 300, models)
+            except Exception:
+                pass
+    return JSONResponse(
+        {
+            "models": models,
+            "current_model": config.get("agy_model", ""),
+            "current_effort": config.get("agy_effort", ""),
+            "usage": hub.usage_stats,
+        }
+    )
+
+
+class ModelUpdate(BaseModel):
+    model: str = ""
+    effort: str = ""
+
+
+@app.post("/api/model")
+async def update_model(request: Request, body: ModelUpdate) -> JSONResponse:
+    verify_request(request)
+    if body.model and not re.fullmatch(r"[a-zA-Z0-9._-]{1,64}", body.model):
+        raise HTTPException(status_code=400, detail="Invalid model id")
+    if body.effort not in ("", "low", "medium", "high", "xhigh", "max"):
+        raise HTTPException(status_code=400, detail="Invalid effort level")
+    config["agy_model"] = body.model
+    config["agy_effort"] = body.effort
+    save_config(config)
+    audit_log("model_update", f"model={body.model or 'default'} effort={body.effort or 'default'}")
+    return JSONResponse({"model": config["agy_model"], "effort": config["agy_effort"]})
 
 
 class WorkspaceUpdate(BaseModel):
@@ -843,6 +914,10 @@ async def handle_agy_turn(prompt: str, msg_id: str) -> None:
         "--mode",
         mode,
     ]
+    if config.get("agy_model"):
+        args.extend(["--model", config["agy_model"]])
+    if config.get("agy_effort"):
+        args.extend(["--effort", config["agy_effort"]])
     if hub.conversation_id and is_valid_cid(hub.conversation_id):
         args.extend(["--resume", hub.conversation_id])
 
@@ -900,6 +975,15 @@ async def handle_agy_turn(prompt: str, msg_id: str) -> None:
 
             elif ev_type == "result":
                 res = evt.get("result", {})
+                usage = res.get("usage") or {}
+                if usage:
+                    hub.usage_stats["turns"] += 1
+                    for k in ("input_tokens", "output_tokens", "thinking_tokens", "cache_read_tokens", "total_tokens"):
+                        hub.usage_stats[k] += int(usage.get(k, 0) or 0)
+                    mkey = config.get("agy_model") or "default"
+                    mstats = hub.usage_stats["by_model"].setdefault(mkey, {"turns": 0, "total_tokens": 0})
+                    mstats["turns"] += 1
+                    mstats["total_tokens"] += int(usage.get("total_tokens", 0) or 0)
                 if not assistant_text and res.get("response"):
                     assistant_text = res["response"]
                     await hub.broadcast({"type": "token", "text": assistant_text})
