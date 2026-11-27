@@ -31,8 +31,8 @@
 
 ## Quick Start (Simple & Fast)
 
-1. **Prerequisite:** Make sure **`agy` CLI** is installed and signed in on your Windows PC (`~/.gemini/bin/agy.exe`).
-2. **Download & Run:** Download **`AntigravityRemote.exe`** from [Releases](https://github.com/Tareq612345/antigravity-remote/releases) and double-click it.
+1. **Prerequisite:** Make sure **`agy` CLI** is installed and signed in on your Windows PC (`~/.gemini/bin/agy.exe`). The app launches `agy` for each message, so the CLI must work on its own — the Antigravity IDE does not need to be open.
+2. **Download & Run:** Download **`AntigravityRemote.exe`** ([release `0.1`](https://github.com/Tareq612345/antigravity-remote/releases/tag/0.1), 32.9 MB) and double-click it. Its SHA256 is listed under [Latest Release Checksum](#latest-release-checksum-01).
 3. **Link Google Account:** Click **Sign in with Google** in the desktop window, then click **Confirm & Link This PC**.
 4. **Open on Mobile:** Visit **[https://antigravity-remote-8fi.pages.dev/](https://antigravity-remote-8fi.pages.dev/)** from your phone and sign in with the **same Google account**.
 
