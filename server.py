@@ -43,7 +43,7 @@ ALLOWED_UPLOAD_EXTS = {
     ".mp3", ".wav", ".m4a", ".ogg", ".pdf",
 }
 DEFAULT_ALLOWED_ORIGINS = [
-    "https://tareq612345.github.io",
+    "https://antigravity-remote-8fi.pages.dev",
     "http://127.0.0.1:8765",
     "http://localhost:8765",
 ]

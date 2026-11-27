@@ -61,7 +61,7 @@
 1. Make sure **`agy` CLI** is installed and signed in on your PC (`~/.gemini/bin/agy.exe`).
 2. Run **`AntigravityRemote.exe`** (it automatically downloads and SHA256-verifies `cloudflared.exe` if needed).
 3. Click **Sign in with Google** to link your PC, then click **Confirm & Link This PC**.
-4. Open the web client on your phone (`https://tareq612345.github.io/antigravity-remote/`) and sign in with the **same Google account**.
+4. Open the web client on your phone (`https://antigravity-remote-8fi.pages.dev/`) and sign in with the **same Google account**.
 
 ### Option 2: Run from Source
 ```bash

@@ -92,7 +92,7 @@ def main() -> None:
         window.show()
 
     def open_mobile_site(icon, item) -> None:
-        webbrowser.open("https://tareq612345.github.io/antigravity-remote/")
+        webbrowser.open("https://antigravity-remote-8fi.pages.dev/")
 
     def quit_app(icon, item) -> None:
         if tray_icon:
