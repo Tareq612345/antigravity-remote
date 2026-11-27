@@ -9,6 +9,12 @@
     <img src="https://img.shields.io/badge/Tunnel-Cloudflare-F38020?style=flat-square" alt="Cloudflare" />
     <img src="https://img.shields.io/badge/Auth-Supabase%20%2B%20Google-3ECF8E?style=flat-square" alt="Supabase" />
   </p>
+
+  <p>
+    <a href="docs/GUIDE.en.md"><b>English Guide</b></a>
+    &nbsp;|&nbsp;
+    <a href="docs/GUIDE.ar.md"><b>دليل عربي</b></a>
+  </p>
 </div>
 
 ---
