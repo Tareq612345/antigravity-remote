@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#0d0d0d" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>Antigravity</title>
+  <link rel="icon" type="image/svg+xml" href="/static/icon.svg" />
   <style>
     :root {
       --bg: #0d0d0d;
@@ -62,6 +63,8 @@
     .side-brand { font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 8px; }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--err); }
     .dot.online { background: var(--ok); }
+    .brand-icon { width: 22px; height: 22px; border-radius: 6px; object-fit: cover; opacity: .45; filter: grayscale(1); transition: opacity .2s ease, filter .2s ease; flex: 0 0 auto; }
+    .brand-icon.online { opacity: 1; filter: none; }
     .icon-btn {
       background: transparent;
       border: none;
@@ -373,7 +376,7 @@
   <aside id="sidebar">
     <div class="side-top">
       <div class="side-brand">
-        <span id="connDot" class="dot"></span>
+        <img id="connDot" class="brand-icon" src="/static/icon.svg" alt="" />
         <span>Antigravity</span>
       </div>
       <button class="icon-btn" title="إغلاق القائمة" onclick="toggleSidebar(true)">✕</button>
