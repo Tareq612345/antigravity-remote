@@ -493,21 +493,30 @@
       }
 
       setAuthBusy(true, lang === "ar" ? `جاري الاتصال بـ ${device.device_name}...` : `Connecting to ${device.device_name}...`);
-      try {
-        const res = await fetch(`${device.tunnel_url}/api/status`, {
-          headers: { "Authorization": `Bearer ${SB_TOKEN}` }
-        });
-        if (!res.ok) throw new Error("Unauthorized or offline");
-        SERVER_URL = device.tunnel_url;
-        setAuthBusy(false);
-        authScreen.classList.add("hidden");
-        connectWS();
-        refreshStatus();
-        loadChats();
-      } catch {
-        setAuthBusy(false, lang === "ar" ? `تعذر الوصول إلى (${device.device_name}). تأكد أن السيرفر شغال على الكمبيوتر.` : `Could not reach ${device.device_name}. Ensure the app is running on your PC.`);
-        retryBtn.style.display = "inline-block";
+      for (let attempt = 1; attempt <= 6; attempt++) {
+        try {
+          const res = await fetch(`${device.tunnel_url}/api/status`, {
+            headers: { "Authorization": `Bearer ${SB_TOKEN}` }
+          });
+          if (!res.ok) throw new Error("Unauthorized or offline");
+          SERVER_URL = device.tunnel_url;
+          setAuthBusy(false);
+          authScreen.classList.add("hidden");
+          connectWS();
+          refreshStatus();
+          loadChats();
+          loadModels();
+          loadSlashItems();
+          return;
+        } catch {
+          if (attempt < 6) {
+            setAuthBusy(true, lang === "ar" ? `في انتظار جاهزية النفق (${attempt}/6)...` : `Waiting for tunnel DNS (${attempt}/6)...`);
+            await new Promise(r => setTimeout(r, 3000));
+          }
+        }
       }
+      setAuthBusy(false, lang === "ar" ? `تعذر الوصول إلى (${device.device_name}). تأكد أن السيرفر شغال على الكمبيوتر.` : `Could not reach ${device.device_name}. Ensure the app is running on your PC.`);
+      retryBtn.style.display = "inline-block";
     }
 
     function toggleSidebar(forceClose = false) {
