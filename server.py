@@ -36,7 +36,7 @@ DEFAULT_AGY_PATH = str(Path.home() / ".gemini" / "bin" / "agy.exe")
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 MAX_WS_CLIENTS = 10
-UPLOADS_DIR = DATA_DIR / "uploads"
+DEFAULT_AGY_MODE = "accept-edits"
 ALLOWED_UPLOAD_EXTS = {
     ".txt", ".md", ".json", ".csv", ".log",
     ".png", ".jpg", ".jpeg", ".webp", ".gif",
@@ -84,7 +84,7 @@ def load_or_create_config() -> dict[str, Any]:
     if CONFIG_PATH.exists():
         cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
         cfg.setdefault("agy_path", DEFAULT_AGY_PATH)
-        cfg.setdefault("agy_mode", "plan")
+        cfg.setdefault("agy_mode", DEFAULT_AGY_MODE)
         cfg.setdefault("bind_host", "127.0.0.1")
         cfg.setdefault("allowed_origins", DEFAULT_ALLOWED_ORIGINS)
         cfg.setdefault("allowed_workspaces", [cfg.get("workspace", str(Path.home() / "Desktop"))])
@@ -93,7 +93,7 @@ def load_or_create_config() -> dict[str, Any]:
     cfg = {
         "token": secrets.token_urlsafe(24),
         "agy_path": DEFAULT_AGY_PATH,
-        "agy_mode": "plan",
+        "agy_mode": DEFAULT_AGY_MODE,
         "workspace": default_ws,
         "allowed_workspaces": [default_ws],
         "allowed_origins": DEFAULT_ALLOWED_ORIGINS,
@@ -107,8 +107,10 @@ def load_or_create_config() -> dict[str, Any]:
 
 
 def save_config(cfg: dict[str, Any]) -> None:
+    is_new = not CONFIG_PATH.exists()
     CONFIG_PATH.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
-    restrict_file_permissions(CONFIG_PATH)
+    if is_new:
+        restrict_file_permissions(CONFIG_PATH)
 
 
 def load_chats_store() -> dict[str, Any]:
@@ -121,8 +123,10 @@ def load_chats_store() -> dict[str, Any]:
 
 
 def save_chats_store(store: dict[str, Any]) -> None:
+    is_new = not CHATS_PATH.exists()
     CHATS_PATH.write_text(json.dumps(store, indent=2, ensure_ascii=False), encoding="utf-8")
-    restrict_file_permissions(CHATS_PATH)
+    if is_new:
+        restrict_file_permissions(CHATS_PATH)
 
 
 config = load_or_create_config()
@@ -168,7 +172,8 @@ class HubState:
         self._worker_task: asyncio.Task[None] | None = None
         self._ide_watch_task: asyncio.Task[None] | None = None
         self.ide_mirror_id: str | None = None
-        self.pairing_codes: dict[str, float] = {}
+        self.pairing_codes: dict[str, tuple[str, float]] = {}
+        self.active_ws_connections: int = 0
 
     def issue_pairing_code(self) -> tuple[str, str]:
         now = time.monotonic()
@@ -181,11 +186,17 @@ class HubState:
     def consume_pairing_code(self, code: str | None, cookie_secret: str | None) -> bool:
         if not code or not cookie_secret:
             return False
-        entry = self.pairing_codes.pop(code, None)
+        entry = self.pairing_codes.get(code)
         if not entry:
             return False
         expected_cookie, exp = entry
-        return exp > time.monotonic() and secrets.compare_digest(cookie_secret, expected_cookie)
+        if exp <= time.monotonic():
+            self.pairing_codes.pop(code, None)
+            return False
+        if not secrets.compare_digest(cookie_secret, expected_cookie):
+            return False
+        self.pairing_codes.pop(code, None)
+        return True
 
     async def broadcast(self, payload: dict[str, Any]) -> None:
         dead: list[WebSocket] = []
@@ -288,7 +299,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 def client_ip(request: Request) -> str:
     peer = (request.client.host if request.client else "") or "unknown"
-    if peer in ("127.0.0.1", "::1", "localhost"):
+    if peer in ("127.0.0.1", "::1", "localhost") and request.headers.get("cf-ray"):
         cf_ip = (request.headers.get("cf-connecting-ip") or "").strip()
         if cf_ip:
             return cf_ip
@@ -468,7 +479,7 @@ async def get_status(request: Request) -> JSONResponse:
     verify_request(request)
     st = sleep_manager.status()
     payload: dict[str, Any] = {
-        "agy_mode": config.get("agy_mode", "accept-edits"),
+        "agy_mode": config.get("agy_mode", DEFAULT_AGY_MODE),
         "busy": hub.busy,
         "queue_count": len(hub.queue),
         "sleep": {
@@ -697,18 +708,16 @@ async def upload_file(request: Request, file: UploadFile = File(...)) -> JSONRes
 
     safe_stem = re.sub(r"[^a-zA-Z0-9._-]", "_", Path(raw_name).stem)[:64] or "file"
     safe_name = f"{safe_stem}_{int(time.time())}{ext}"
-    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    uploads_real = os.path.realpath(UPLOADS_DIR)
-    dest_real = os.path.realpath(os.path.join(uploads_real, safe_name))
-    if os.path.commonpath([uploads_real, dest_real]) != uploads_real:
-        raise HTTPException(status_code=403, detail="Invalid upload path")
-    dest = Path(dest_real)
+    uploads_dir = resolve_safe_path("_uploads")
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    dest = resolve_safe_path(f"_uploads/{safe_name}")
     dest.write_bytes(data)
     audit_log("file_upload", f"name={safe_name} bytes={len(data)}")
     return JSONResponse(
         {
             "filename": safe_name,
             "path": str(dest),
+            "rel_path": f"_uploads/{safe_name}",
             "size": len(data),
         }
     )
@@ -716,47 +725,52 @@ async def upload_file(request: Request, file: UploadFile = File(...)) -> JSONRes
 
 @app.websocket("/ws/chat")
 async def ws_chat(websocket: WebSocket) -> None:
-    if len(hub.clients) >= MAX_WS_CLIENTS:
+    if hub.active_ws_connections >= MAX_WS_CLIENTS:
         await websocket.close(code=4008)
         return
-    await websocket.accept()
-    peer = (websocket.client.host if websocket.client else "") or "unknown"
-    ip = (websocket.headers.get("cf-connecting-ip") or "").strip() if peer in ("127.0.0.1", "::1", "localhost") else peer
-    ip = ip or peer
+    hub.active_ws_connections += 1
     try:
-        auth_raw = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
-        auth_msg = json.loads(auth_raw)
-        if auth_msg.get("type") != "auth" or not check_credentials(auth_msg.get("token"), auth_msg.get("sb_token")):
-            auth_limiter.check(f"ws_fail:{ip}")
-            audit_log("ws_auth_failure", f"ip={ip}")
+        await websocket.accept()
+        peer = (websocket.client.host if websocket.client else "") or "unknown"
+        ip = (
+            (websocket.headers.get("cf-connecting-ip") or "").strip()
+            if peer in ("127.0.0.1", "::1", "localhost") and websocket.headers.get("cf-ray")
+            else peer
+        ) or peer
+        try:
+            auth_raw = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+            auth_msg = json.loads(auth_raw)
+            if auth_msg.get("type") != "auth" or not check_credentials(auth_msg.get("token"), auth_msg.get("sb_token")):
+                if not auth_limiter.check(f"ws_fail:{ip}"):
+                    audit_log("ws_rate_limited", f"ip={ip}")
+                    await websocket.close(code=4029)
+                    return
+                audit_log("ws_auth_failure", f"ip={ip}")
+                await websocket.close(code=4001)
+                return
+        except Exception:
+            if not auth_limiter.check(f"ws_fail:{ip}"):
+                await websocket.close(code=4029)
+                return
             await websocket.close(code=4001)
             return
-    except Exception:
-        auth_limiter.check(f"ws_fail:{ip}")
-        await websocket.close(code=4001)
-        return
 
-    if not auth_limiter.check(f"ws_ok:{ip}"):
-        await websocket.close(code=4029)
-        return
+        hub.clients.add(websocket)
+        sleep_manager.touch()
 
-    hub.clients.add(websocket)
-    sleep_manager.touch()
-
-    await websocket.send_text(
-        json.dumps(
-            {
-                "type": "history",
-                "messages": hub.history,
-                "conversation_id": hub.conversation_id,
-                "busy": hub.busy,
-                "queue_count": len(hub.queue),
-            },
-            ensure_ascii=False,
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "history",
+                    "messages": hub.history,
+                    "conversation_id": hub.conversation_id,
+                    "busy": hub.busy,
+                    "queue_count": len(hub.queue),
+                },
+                ensure_ascii=False,
+            )
         )
-    )
 
-    try:
         while True:
             raw = await websocket.receive_text()
             data = json.loads(raw)
@@ -788,9 +802,12 @@ async def ws_chat(websocket: WebSocket) -> None:
                 await hub.broadcast({"type": "queue", "count": q_len})
 
     except WebSocketDisconnect:
-        hub.clients.discard(websocket)
+        pass
     except Exception:
+        pass
+    finally:
         hub.clients.discard(websocket)
+        hub.active_ws_connections = max(0, hub.active_ws_connections - 1)
 
 
 async def handle_agy_turn(prompt: str, msg_id: str) -> None:
@@ -814,9 +831,9 @@ async def handle_agy_turn(prompt: str, msg_id: str) -> None:
         await hub.broadcast({"type": "status", "busy": False})
         return
 
-    mode = config.get("agy_mode", "plan")
+    mode = config.get("agy_mode", DEFAULT_AGY_MODE)
     if mode not in ("accept-edits", "plan"):
-        mode = "plan"
+        mode = DEFAULT_AGY_MODE
 
     args = [
         "-p",

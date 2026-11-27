@@ -1,26 +1,33 @@
-# antigravity-remote
+# Antigravity Remote
 
-Control the Antigravity sessions on my own PC from a browser on any other device.
+An unofficial remote control bridge and mobile-friendly web UI for Google Antigravity (`agy` CLI & local IDE transcripts), featuring Cloudflare Tunnel, Supabase Google OAuth verification, Windows sleep management, and a lightweight desktop control panel.
 
-A small FastAPI server that runs on the Windows machine where Antigravity is installed, and serves a web page you can open from a phone or another computer.
+## Requirements
+- Windows 10/11 (for desktop app & sleep manager)
+- `agy` CLI installed and signed in (`~/.gemini/bin/agy.exe`)
+- Python 3.11+ (if running from source)
 
-## What is in the repo
-
-- `server.py` - the FastAPI app. Serves the web UI in `static/`, lists the Antigravity conversations and handles chat actions.
-- `ide_transcript_watcher.py` - reads the Antigravity CLI conversation files under `~/.gemini/antigravity-cli/conversations` and the IDE brain folder, and turns them into messages the page can show and continue.
-- `tunnel_and_auth.py` - opens a Cloudflare quick tunnel with `cloudflared` so the server is reachable from outside, and puts Supabase email/password sign-in in front of it.
-- `sleep_manager.py` - keeps Windows awake while the page is being used, so the machine does not fall asleep in the middle of a session.
-- `start_server.bat` and `setup_autostart.ps1` - start the server on Windows, optionally when I log in.
-
-## Run
-
-```
-pip install fastapi uvicorn requests
-python server.py
+## Running from Source
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python desktop_app.py
 ```
 
-Then open the address the server prints and sign in.
+Or run the headless server directly:
+```bash
+uvicorn server:app --host 127.0.0.1 --port 8765 --no-access-log
+```
 
-## Status
+## Building the Standalone Windows Executable
+```bash
+pip install pyinstaller
+pyinstaller --noconfirm --onefile --noconsole --name AntigravityRemote --icon "static\app.ico" --add-data "static;static" --exclude-module google.antigravity --exclude-module google.genai --exclude-module mcp --exclude-module tkinter --exclude-module unittest --exclude-module pydoc desktop_app.py
+```
 
-Personal project, early, Windows only. No releases yet.
+### Latest Release Checksum
+- `AntigravityRemote.exe` SHA256: `6A60FC5BE8F5BC2BEEB379DA7C0F6B9E79C39A389218637D830432009B8F1BAE`
+
+## Security
+See [SECURITY.md](SECURITY.md) for authentication details, file permission hardening, and vulnerability reporting.

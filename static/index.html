@@ -503,11 +503,6 @@
   </div>
 
   <script>
-    const urlParams = new URLSearchParams(location.search);
-    if (urlParams.get("token")) {
-      sessionStorage.setItem("ag_token", urlParams.get("token"));
-      history.replaceState({}, document.title, location.pathname);
-    }
     let token = sessionStorage.getItem("ag_token") || "";
     let ws = null;
     let streamingEl = null;
