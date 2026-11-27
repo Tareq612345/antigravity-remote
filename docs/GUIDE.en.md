@@ -260,7 +260,7 @@ You tried to switch to a folder from the phone that was never added on the PC. A
 **Pairing page says "Invalid or expired pairing code"**
 The code lives 5 minutes and works once. Open `http://127.0.0.1:8765/pc-login` again from the PC to get a fresh one.
 
-**`/pc-login` returns 403 "only allowed from localhost"**
+**`/pc-login` returns 403 "PC pairing is only allowed from localhost"**
 You opened it through the tunnel. It only works from the PC itself.
 
 **Port 8765 already in use**
