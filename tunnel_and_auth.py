@@ -137,7 +137,7 @@ class TunnelManager:
                     on_url_ready = None
 
     def _wait_and_notify(self, url: str, callback) -> None:
-        for _ in range(15):
+        for _ in range(40):
             if self._stop_event.is_set():
                 return
             try:
@@ -149,7 +149,6 @@ class TunnelManager:
             except Exception:
                 pass
             time.sleep(1.5)
-        # Fallback: notify anyway after wait
         try:
             callback(url)
         except Exception as exc:
