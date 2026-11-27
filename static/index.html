@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0d0d0d" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>Antigravity</title>
+  <style>
+    :root {
+      --bg: #0d0d0d;
+      --sidebar: #171717;
+      --surface: #212121;
+      --composer: #2f2f2f;
+      --hover: #2a2a2a;
+      --border: rgba(255, 255, 255, 0.1);
+      --text: #ececec;
+      --muted: #9b9b9b;
+      --ok: #10a37f;
+      --warn: #f59e0b;
+      --err: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Arabic", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100dvh;
+      display: flex;
+      overflow: hidden;
+    }
+
+    /* Sidebar */
+    aside {
+      width: 260px;
+      background: var(--sidebar);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      transition: transform 0.22s ease, margin 0.22s ease;
+      z-index: 30;
+    }
+    aside.collapsed { margin-right: -260px; }
+    @media (max-width: 768px) {
+      aside {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        right: 0;
+        margin-right: 0 !important;
+        transform: translateX(0);
+      }
+      aside.collapsed { transform: translateX(100%); }
+    }
+    .side-top {
+      padding: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .side-brand { font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--err); }
+    .dot.online { background: var(--ok); }
+    .icon-btn {
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    }
+    .icon-btn:hover { background: var(--hover); color: var(--text); }
+
+    .side-nav { padding: 4px 8px; display: flex; flex-direction: column; gap: 2px; }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 10px;
+      border-radius: 8px;
+      background: transparent;
+      border: none;
+      color: var(--text);
+      font-size: 13.5px;
+      cursor: pointer;
+      text-align: right;
+      width: 100%;
+    }
+    .nav-item:hover, .nav-item.active { background: var(--hover); }
+    .side-label {
+      padding: 14px 14px 6px;
+      font-size: 11.5px;
+      color: var(--muted);
+      font-weight: 500;
+    }
+    .recents {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 8px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .recents::-webkit-scrollbar { width: 5px; }
+    .recents::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 99px; }
+    .recent-item {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 38px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      line-height: 1.4;
+      color: #c4c7c5;
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      text-align: right;
+      width: 100%;
+    }
+    .recent-item span {
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      direction: auto;
+    }
+    .recent-item:hover { background: #282a2c; color: #e3e3e3; }
+    .recent-item.active { background: #004a77; color: #c2e7ff; font-weight: 500; }
+    .side-footer {
+      padding: 10px 12px;
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    /* Main */
+    .main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
+    header {
+      height: 52px;
+      padding: 0 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .header-left { display: flex; align-items: center; gap: 8px; }
+    .pill {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      direction: ltr;
+    }
+
+    /* Views */
+    .view { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+    .view.active { display: flex; }
+
+    /* Chat */
+    .chat-scroll { flex: 1; overflow-y: auto; padding: 16px 14px 24px; }
+    .chat-container {
+      max-width: 760px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      min-height: 100%;
+    }
+    .empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      text-align: center;
+      padding: 40px 16px;
+    }
+    .empty-state h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.3px; }
+    .suggestions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 560px; }
+    .chip {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 8px 14px;
+      border-radius: 999px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .chip:hover { background: var(--hover); color: var(--text); }
+
+    .msg { line-height: 1.65; font-size: 15px; white-space: pre-wrap; word-break: break-word; }
+    .msg.user {
+      align-self: flex-start;
+      background: var(--composer);
+      padding: 10px 16px;
+      border-radius: 20px;
+      max-width: 82%;
+    }
+    .msg.assistant {
+      align-self: stretch;
+      padding: 4px 2px;
+      direction: auto;
+    }
+    .msg.error {
+      align-self: center;
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #fca5a5;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 13px;
+    }
+    .q-badge {
+      display: inline-block;
+      font-size: 11px;
+      color: #fde68a;
+      margin-top: 4px;
+    }
+    .meta-box {
+      font-size: 12px;
+      color: var(--muted);
+      background: var(--sidebar);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 12px;
+      margin-bottom: 8px;
+      direction: ltr;
+      text-align: left;
+    }
+
+    /* Composer */
+    .composer-wrap { padding: 8px 14px 16px; }
+    .composer-inner {
+      max-width: 760px;
+      margin: 0 auto;
+      background: var(--composer);
+      border-radius: 26px;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .attach-bar { display: none; flex-wrap: wrap; gap: 6px; padding: 2px 8px; }
+    .attach-bar.open { display: flex; }
+    .composer-row { display: flex; align-items: flex-end; gap: 8px; }
+    textarea {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--text);
+      font-size: 15px;
+      line-height: 1.5;
+      padding: 6px 4px;
+      resize: none;
+      max-height: 140px;
+      outline: none;
+      font-family: inherit;
+    }
+    .send-btn {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: none;
+      background: #fff;
+      color: #000;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .send-btn.stop { background: var(--text); }
+
+    /* Files & Settings Views */
+    .panel-scroll { flex: 1; overflow-y: auto; padding: 16px; }
+    .panel-box { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+    .card {
+      background: var(--sidebar);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .btn {
+      background: #fff;
+      color: #000;
+      border: none;
+      border-radius: 10px;
+      padding: 9px 14px;
+      font-size: 13.5px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn.secondary { background: var(--composer); color: var(--text); }
+    .file-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 11px 14px;
+      background: var(--sidebar);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      cursor: pointer;
+      direction: ltr;
+      font-size: 13.5px;
+    }
+    .file-row:hover { background: var(--hover); }
+    pre.code-view {
+      background: #050505;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: 12.5px;
+      white-space: pre-wrap;
+      overflow-x: auto;
+      direction: ltr;
+      text-align: left;
+    }
+    input[type="text"], input[type="password"], select {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      direction: ltr;
+      font-size: 13.5px;
+    }
+
+    /* Backdrop & Modal */
+    #backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 25;
+    }
+    #backdrop.open { display: block; }
+    #authModal {
+      position: fixed; inset: 0; background: rgba(0, 0, 0, 0.85);
+      display: none; align-items: center; justify-content: center; padding: 20px; z-index: 50;
+    }
+    #authModal.open { display: flex; }
+    #authModal .card { width: 100%; max-width: 380px; }
+  </style>
+</head>
+<body>
+  <div id="backdrop" onclick="toggleSidebar(true)"></div>
+
+  <aside id="sidebar">
+    <div class="side-top">
+      <div class="side-brand">
+        <span id="connDot" class="dot"></span>
+        <span>Antigravity</span>
+      </div>
+      <button class="icon-btn" title="إغلاق القائمة" onclick="toggleSidebar(true)">✕</button>
+    </div>
+
+    <div class="side-nav">
+      <button class="nav-item" onclick="startNewChat()">✏️ محادثة جديدة</button>
+      <button class="nav-item" onclick="switchView('files')">📁 مدير الملفات</button>
+      <button class="nav-item" onclick="switchView('settings')">⚙️ المسار والسكون</button>
+    </div>
+
+    <div class="side-label">المحادثات السابقة</div>
+    <div id="recentsList" class="recents"></div>
+
+    <div class="side-footer">
+      <div id="sleepSideText">Awake: --:--</div>
+      <div id="wsSideText" style="direction:ltr;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">--</div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header>
+      <div class="header-left">
+        <button class="icon-btn" title="القائمة" onclick="toggleSidebar()">☰</button>
+        <span id="headerTitle" style="font-weight:600;font-size:15px;">Antigravity</span>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <span id="queuePill" class="pill" style="display:none;color:#fde68a;">Queue: 0</span>
+        <span id="sleepPill" class="pill">Awake: --:--</span>
+      </div>
+    </header>
+
+    <!-- Chat View -->
+    <section id="view-chat" class="view active">
+      <div id="chatScroll" class="chat-scroll">
+        <div id="chatContainer" class="chat-container">
+          <div id="emptyState" class="empty-state">
+            <h1>نبدأ منين النهاردة؟</h1>
+            <div class="suggestions">
+              <button class="chip" onclick="quickSend('راجع ملفات المشروع الحالي ولخصها')">📁 مراجعة ملفات المشروع</button>
+              <button class="chip" onclick="quickSend('ما هي آخر التعديلات في هذا المجلد؟')">🔍 فحص آخر التعديلات</button>
+              <button class="chip" onclick="switchView('files')">📂 فتح مدير الملفات</button>
+            </div>
+          </div>
+          <div id="messages" style="display:flex;flex-direction:column;gap:16px;"></div>
+        </div>
+      </div>
+
+      <div class="composer-wrap">
+        <div class="composer-inner">
+          <div id="attachBar" class="attach-bar"></div>
+          <div class="composer-row">
+            <input id="fileUploadInput" type="file" multiple style="display:none" onchange="uploadSelectedFiles(this.files)" />
+            <button class="icon-btn" title="إرفاق ملف أو صورة أو صوت" onclick="document.getElementById('fileUploadInput').click()">＋</button>
+            <textarea id="promptInput" rows="1" placeholder="اسأل Antigravity..."></textarea>
+            <button id="stopBtn" class="send-btn stop" style="display:none;" title="إيقاف" onclick="stopTurn()">■</button>
+            <button id="sendBtn" class="send-btn" title="إرسال" onclick="sendPrompt()">↑</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Files View -->
+    <section id="view-files" class="view">
+      <div class="panel-scroll">
+        <div class="panel-box">
+          <div class="row">
+            <div style="display:flex;gap:8px;align-items:center;">
+              <button class="btn secondary" onclick="switchView('chat')">← العودة للشات</button>
+              <button class="btn secondary" onclick="loadFiles('')">الرئيسية</button>
+            </div>
+            <span id="cwdLabel" class="pill">/</span>
+          </div>
+          <div id="filesList" style="display:flex;flex-direction:column;gap:8px;"></div>
+          <div id="previewActions" class="row" style="display:none;">
+            <button id="downloadFileBtn" class="btn">تحميل / حفظ الملف</button>
+          </div>
+          <pre id="filePreview" class="code-view" style="display:none;"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- Settings View -->
+    <section id="view-settings" class="view">
+      <div class="panel-scroll">
+        <div class="panel-box">
+          <div class="row">
+            <strong>إعدادات السيرفر والمسار</strong>
+            <button class="btn secondary" onclick="switchView('chat')">← العودة للشات</button>
+          </div>
+          <div class="card">
+            <strong>مسار العمل (Workspace) ووضع الصلاحيات</strong>
+            <input id="workspaceInput" type="text" placeholder="C:\Projects\..." />
+            <select id="modeSelect">
+              <option value="accept-edits">accept-edits (تعديل الملفات تلقائياً)</option>
+              <option value="plan">plan (تخطيط فقط)</option>
+            </select>
+            <button class="btn" onclick="saveWorkspace()">حفظ المسار والوضع</button>
+          </div>
+          <div class="card">
+            <div class="row">
+              <strong>منع السكون (Windows Awake)</strong>
+              <span id="sleepStateText" class="pill">--</span>
+            </div>
+            <div class="row">
+              <button class="btn" onclick="extendSleep(7)">تجديد 7 ساعات</button>
+              <button class="btn secondary" onclick="toggleDisplay()">تبديل إبقاء الشاشة</button>
+            </div>
+          </div>
+          <div class="card">
+            <strong>معلومات الاتصال</strong>
+            <div id="serverInfo" style="font-size:13px;color:var(--muted);direction:ltr;text-align:left;white-space:pre-wrap;">--</div>
+            <button class="btn secondary" onclick="openAuth()">تغيير رمز الدخول (Token)</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="authModal">
+    <div class="card">
+      <h3>تسجيل الدخول</h3>
+      <p style="font-size:13px;color:var(--muted);">أدخل رمز الدخول الموجود في ملف config.json على جهازك.</p>
+      <input id="tokenInput" type="password" placeholder="Access Token" />
+      <button class="btn" onclick="saveToken()">اتصال</button>
+    </div>
+  </div>
+
+  <script>
+    const urlParams = new URLSearchParams(location.search);
+    if (urlParams.get("token")) localStorage.setItem("ag_token", urlParams.get("token"));
+    let token = localStorage.getItem("ag_token") || "";
+    let ws = null;
+    let streamingEl = null;
+    let liveMetaEl = null;
+    let keepDisplayOn = false;
+    let pendingAttachments = [];
+    let currentPreviewPath = "";
+
+    if (window.innerWidth <= 768) document.getElementById("sidebar").classList.add("collapsed");
+
+    function toggleSidebar(forceClose = false) {
+      const sb = document.getElementById("sidebar");
+      const bd = document.getElementById("backdrop");
+      const collapsed = forceClose ? true : !sb.classList.contains("collapsed");
+      sb.classList.toggle("collapsed", collapsed);
+      if (window.innerWidth <= 768) bd.classList.toggle("open", !collapsed);
+    }
+
+    function switchView(name) {
+      document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+      document.getElementById("view-" + name).classList.add("active");
+      if (window.innerWidth <= 768) toggleSidebar(true);
+      if (name === "files") loadFiles("");
+      if (name === "settings") refreshStatus();
+    }
+
+    function openAuth() { document.getElementById("authModal").classList.add("open"); }
+    function saveToken() {
+      token = document.getElementById("tokenInput").value.trim();
+      localStorage.setItem("ag_token", token);
+      document.getElementById("authModal").classList.remove("open");
+      connectWS();
+      refreshStatus();
+      loadChats();
+    }
+
+    function updateEmptyState() {
+      const hasMsgs = document.getElementById("messages").children.length > 0;
+      document.getElementById("emptyState").style.display = hasMsgs ? "none" : "flex";
+    }
+
+    function appendMessage(m) {
+      const box = document.getElementById("messages");
+      const wrap = document.createElement("div");
+      wrap.className = "msg " + m.role;
+      if (m.id) wrap.dataset.msgId = m.id;
+      const meta = (m.tools || []).map(t => `🔧 ${t.name}`);
+      if (meta.length) {
+        const mb = document.createElement("div");
+        mb.className = "meta-box";
+        mb.textContent = meta.join("\n");
+        wrap.appendChild(mb);
+      }
+      const span = document.createElement("span");
+      span.textContent = m.text || "";
+      wrap.appendChild(span);
+      if (m.queued) {
+        const qb = document.createElement("div");
+        qb.className = "q-badge";
+        qb.textContent = "⏳ في الطابور";
+        wrap.appendChild(qb);
+      }
+      box.appendChild(wrap);
+      updateEmptyState();
+      const sc = document.getElementById("chatScroll");
+      sc.scrollTop = sc.scrollHeight;
+    }
+
+    function connectWS() {
+      if (!token) { openAuth(); return; }
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      ws = new WebSocket(`${proto}//${location.host}/ws/chat?token=${encodeURIComponent(token)}`);
+      ws.onopen = () => document.getElementById("connDot").classList.add("online");
+      ws.onclose = (ev) => {
+        document.getElementById("connDot").classList.remove("online");
+        if (ev.code === 4001) openAuth();
+        else setTimeout(connectWS, 3000);
+      };
+      ws.onmessage = (ev) => {
+        const data = JSON.parse(ev.data);
+        if (data.type === "history") {
+          document.getElementById("messages").innerHTML = "";
+          (data.messages || []).forEach(appendMessage);
+          document.getElementById("headerTitle").textContent = data.title || (data.conversation_id ? `Antigravity (${data.conversation_id.slice(0, 8)})` : "Antigravity");
+          if (data.conversation_id && (!data.messages || data.messages.length === 0)) {
+            appendMessage({ role: "assistant", text: `تم فتح المحادثة (${data.conversation_id.slice(0, 8)}) — اكتب رسالتك للمتابعة فيها.` });
+          }
+          updateEmptyState();
+          updateBusyUI(!!data.busy);
+          updateQueuePill(data.queue_count || 0);
+        } else if (data.type === "message") {
+          appendMessage(data.message);
+        } else if (data.type === "thought") {
+          ensureLiveBubble();
+          liveMetaEl.style.display = "block";
+          liveMetaEl.textContent += `💭 ${data.text}\n`;
+        } else if (data.type === "tool") {
+          ensureLiveBubble();
+          liveMetaEl.style.display = "block";
+          liveMetaEl.textContent += `🔧 ${data.tool.name}\n`;
+        } else if (data.type === "token") {
+          ensureLiveBubble();
+          streamingEl.textContent += data.text;
+          const sc = document.getElementById("chatScroll");
+          sc.scrollTop = sc.scrollHeight;
+        } else if (data.type === "done") {
+          streamingEl = null;
+          liveMetaEl = null;
+          refreshStatus();
+          loadChats();
+        } else if (data.type === "status") {
+          updateBusyUI(!!data.busy);
+          if (data.active_msg_id) {
+            const el = document.querySelector(`[data-msg-id="${data.active_msg_id}"] .q-badge`);
+            if (el) el.remove();
+          }
+        } else if (data.type === "queue") {
+          updateQueuePill(data.count || 0);
+        } else if (data.type === "error") {
+          appendMessage({ role: "error", text: data.message });
+          streamingEl = null;
+          liveMetaEl = null;
+        }
+      };
+    }
+
+    function updateBusyUI(busy) {
+      document.getElementById("stopBtn").style.display = busy ? "inline-flex" : "none";
+    }
+
+    function updateQueuePill(count) {
+      const p = document.getElementById("queuePill");
+      p.style.display = count > 0 ? "inline-block" : "none";
+      p.textContent = `Queue: ${count}`;
+    }
+
+    function ensureLiveBubble() {
+      if (streamingEl) return;
+      const box = document.getElementById("messages");
+      const wrap = document.createElement("div");
+      wrap.className = "msg assistant";
+      liveMetaEl = document.createElement("div");
+      liveMetaEl.className = "meta-box";
+      liveMetaEl.style.display = "none";
+      streamingEl = document.createElement("span");
+      wrap.appendChild(liveMetaEl);
+      wrap.appendChild(streamingEl);
+      box.appendChild(wrap);
+      updateEmptyState();
+    }
+
+    function quickSend(txt) {
+      document.getElementById("promptInput").value = txt;
+      sendPrompt();
+    }
+
+    function sendPrompt() {
+      const inp = document.getElementById("promptInput");
+      let text = inp.value.trim();
+      if (pendingAttachments.length) {
+        const paths = pendingAttachments.map(a => a.path).join(", ");
+        text = (text ? text + "\n\n" : "") + `[Attached files saved on PC: ${paths}]`;
+        pendingAttachments = [];
+        renderAttachments();
+      }
+      if (!text || !ws || ws.readyState !== 1) return;
+      ws.send(JSON.stringify({ type: "chat", text }));
+      inp.value = "";
+    }
+
+    function stopTurn() {
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "stop" }));
+    }
+
+    document.getElementById("promptInput").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendPrompt(); }
+    });
+
+    async function uploadSelectedFiles(files) {
+      for (const f of files) {
+        const fd = new FormData();
+        fd.append("file", f);
+        const res = await fetch(`/api/upload?token=${encodeURIComponent(token)}`, { method: "POST", body: fd });
+        if (res.ok) pendingAttachments.push(await res.json());
+      }
+      renderAttachments();
+      document.getElementById("fileUploadInput").value = "";
+    }
+
+    function renderAttachments() {
+      const bar = document.getElementById("attachBar");
+      bar.innerHTML = "";
+      bar.classList.toggle("open", pendingAttachments.length > 0);
+      pendingAttachments.forEach((a, idx) => {
+        const chip = document.createElement("span");
+        chip.className = "pill";
+        chip.style.cursor = "pointer";
+        chip.textContent = `📎 ${a.filename} ✕`;
+        chip.onclick = () => { pendingAttachments.splice(idx, 1); renderAttachments(); };
+        bar.appendChild(chip);
+      });
+    }
+
+    async function api(path, opts = {}) {
+      const sep = path.includes("?") ? "&" : "?";
+      const res = await fetch(`${path}${sep}token=${encodeURIComponent(token)}`, opts);
+      if (res.status === 401) { openAuth(); throw new Error("Unauthorized"); }
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    }
+
+    function fmtSeconds(sec) {
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      return `${h}h ${String(m).padStart(2, "0")}m`;
+    }
+
+    async function refreshStatus() {
+      if (!token) return;
+      try {
+        const st = await api("/api/status");
+        keepDisplayOn = st.sleep.keep_display_on;
+        const txt = st.sleep.active ? `Awake: ${fmtSeconds(st.sleep.remaining_seconds)}` : "Sleep Allowed";
+        document.getElementById("sleepPill").textContent = txt;
+        document.getElementById("sleepSideText").textContent = txt;
+        document.getElementById("wsSideText").textContent = st.workspace;
+        document.getElementById("sleepStateText").textContent =
+          `${txt} | Screen: ${keepDisplayOn ? "Always On" : "Can Turn Off"}`;
+        document.getElementById("workspaceInput").value = st.workspace;
+        document.getElementById("modeSelect").value = st.agy_mode || "accept-edits";
+        document.getElementById("serverInfo").textContent =
+          `Workspace: ${st.workspace}\nChat ID: ${st.conversation_id || "New"}\nIPs: ${(st.local_ips || []).join(", ")}\nPort: ${st.port}`;
+      } catch {}
+    }
+
+    async function saveWorkspace() {
+      try {
+        await api("/api/workspace", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            workspace: document.getElementById("workspaceInput").value.trim(),
+            agy_mode: document.getElementById("modeSelect").value
+          })
+        });
+        alert("تم تحديث المسار والوضع بنجاح");
+        refreshStatus();
+      } catch {
+        alert("خطأ: المسار غير موجود أو غير صالح");
+      }
+    }
+
+    async function loadChats() {
+      if (!token) return;
+      try {
+        const data = await api("/api/chats");
+        const list = document.getElementById("recentsList");
+        list.innerHTML = "";
+        data.chats.forEach(c => {
+          const btn = document.createElement("button");
+          btn.className = "recent-item" + (c.id === data.current_id ? " active" : "");
+          const icon = c.source === "ide" ? "🖥️" : "💬";
+          const label = document.createElement("span");
+          label.textContent = c.title;
+          btn.innerHTML = `<span style="flex:0 0 auto;font-size:12px;">${icon}</span>`;
+          btn.appendChild(label);
+          btn.title = `${c.title} (${c.updated_at})`;
+          btn.onclick = async () => {
+            await api("/api/chats/select", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ conversation_id: c.id, source: c.source })
+            });
+            switchView("chat");
+            loadChats();
+          };
+          list.appendChild(btn);
+        });
+      } catch {}
+    }
+
+    async function startNewChat() {
+      await api("/api/chats/select", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversation_id: null })
+      });
+      switchView("chat");
+      loadChats();
+    }
+
+    async function extendSleep(hours) {
+      await api("/api/sleep", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ extend_hours: hours })
+      });
+      refreshStatus();
+    }
+
+    async function toggleDisplay() {
+      await api("/api/sleep", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keep_display_on: !keepDisplayOn })
+      });
+      refreshStatus();
+    }
+
+    async function loadFiles(path) {
+      const data = await api(`/api/files?path=${encodeURIComponent(path)}`);
+      document.getElementById("cwdLabel").textContent = "/" + (data.cwd || "");
+      const list = document.getElementById("filesList");
+      const prev = document.getElementById("filePreview");
+      const acts = document.getElementById("previewActions");
+      prev.style.display = "none";
+      acts.style.display = "none";
+      list.innerHTML = "";
+      data.items.forEach(item => {
+        const el = document.createElement("div");
+        el.className = "file-row";
+        el.textContent = (item.is_dir ? "📁 " : "📄 ") + item.name;
+        el.onclick = async () => {
+          if (item.is_dir) loadFiles(item.path);
+          else {
+            currentPreviewPath = item.path;
+            acts.style.display = "flex";
+            document.getElementById("downloadFileBtn").onclick = () => {
+              window.open(`/api/download?path=${encodeURIComponent(currentPreviewPath)}&token=${encodeURIComponent(token)}`, "_blank");
+            };
+            try {
+              const f = await api(`/api/file?path=${encodeURIComponent(item.path)}`);
+              prev.style.display = "block";
+              prev.textContent = f.content;
+            } catch {
+              prev.style.display = "block";
+              prev.textContent = "(ملف ثنائي أو كبير — اضغط زر التحميل لحفظه على جهازك)";
+            }
+          }
+        };
+        list.appendChild(el);
+      });
+    }
+
+    connectWS();
+    refreshStatus();
+    loadChats();
+    setInterval(refreshStatus, 30000);
+  </script>
+</body>
+</html>

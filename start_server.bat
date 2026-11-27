@@ -1,0 +1,3 @@
+@echo off
+cd /d "C:\Projects\antigravity-remote"
+".venv\Scripts\python.exe" -m uvicorn server:app --host 0.0.0.0 --port 8765

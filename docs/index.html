@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0d0d0d" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>Antigravity Remote</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root {
+      --bg: #0d0d0d;
+      --sidebar: #171717;
+      --surface: #212121;
+      --composer: #2f2f2f;
+      --hover: #2a2a2a;
+      --border: rgba(255, 255, 255, 0.1);
+      --text: #ececec;
+      --muted: #9b9b9b;
+      --ok: #10a37f;
+      --err: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Arabic", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100dvh;
+      display: flex;
+      overflow: hidden;
+    }
+    aside {
+      width: 260px;
+      background: var(--sidebar);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      transition: transform 0.22s ease, margin 0.22s ease;
+      z-index: 30;
+    }
+    aside.collapsed { margin-right: -260px; }
+    @media (max-width: 768px) {
+      aside { position: fixed; top: 0; bottom: 0; right: 0; margin-right: 0 !important; transform: translateX(0); }
+      aside.collapsed { transform: translateX(100%); }
+    }
+    .side-top { padding: 12px; display: flex; align-items: center; justify-content: space-between; }
+    .side-brand { font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--err); }
+    .dot.online { background: var(--ok); }
+    .icon-btn {
+      background: transparent; border: none; color: var(--muted); width: 34px; height: 34px;
+      border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; font-size: 16px;
+    }
+    .icon-btn:hover { background: var(--hover); color: var(--text); }
+    .side-nav { padding: 4px 8px; display: flex; flex-direction: column; gap: 2px; }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px;
+      background: transparent; border: none; color: var(--text); font-size: 13.5px; cursor: pointer; text-align: right; width: 100%;
+    }
+    .nav-item:hover { background: var(--hover); }
+    .side-label { padding: 14px 14px 6px; font-size: 11.5px; color: var(--muted); font-weight: 500; }
+    .recents { flex: 1; overflow-y: auto; padding: 0 8px 12px; display: flex; flex-direction: column; gap: 4px; }
+    .recent-item {
+      flex-shrink: 0; display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 8px 12px;
+      border-radius: 999px; font-size: 13px; line-height: 1.4; color: #c4c7c5; cursor: pointer;
+      border: none; background: transparent; text-align: right; width: 100%;
+    }
+    .recent-item span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: auto; }
+    .recent-item:hover { background: #282a2c; color: #e3e3e3; }
+    .recent-item.active { background: #004a77; color: #c2e7ff; font-weight: 500; }
+    .side-footer { padding: 10px 12px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+
+    .main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
+    header { height: 52px; padding: 0 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .header-left { display: flex; align-items: center; gap: 8px; }
+    .pill { font-size: 12px; padding: 4px 10px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); direction: ltr; }
+    .view { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+    .view.active { display: flex; }
+
+    .chat-scroll { flex: 1; overflow-y: auto; padding: 16px 14px 24px; }
+    .chat-container { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; min-height: 100%; }
+    .empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; text-align: center; padding: 40px 16px; }
+    .msg { line-height: 1.65; font-size: 15px; white-space: pre-wrap; word-break: break-word; }
+    .msg.user { align-self: flex-start; background: var(--composer); padding: 10px 16px; border-radius: 20px; max-width: 82%; }
+    .msg.assistant { align-self: stretch; padding: 4px 2px; direction: auto; }
+    .msg.error { align-self: center; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.4); color: #fca5a5; padding: 10px 14px; border-radius: 12px; font-size: 13px; }
+    .q-badge { display: inline-block; font-size: 11px; color: #fde68a; margin-top: 4px; }
+    .meta-box { font-size: 12px; color: var(--muted); background: var(--sidebar); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; direction: ltr; text-align: left; }
+
+    .composer-wrap { padding: 8px 14px 16px; }
+    .composer-inner { max-width: 760px; margin: 0 auto; background: var(--composer); border-radius: 26px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; border: 1px solid rgba(255, 255, 255, 0.08); }
+    .attach-bar { display: none; flex-wrap: wrap; gap: 6px; padding: 2px 8px; }
+    .attach-bar.open { display: flex; }
+    .composer-row { display: flex; align-items: flex-end; gap: 8px; }
+    textarea { flex: 1; background: transparent; border: none; color: var(--text); font-size: 15px; line-height: 1.5; padding: 6px 4px; resize: none; max-height: 140px; outline: none; font-family: inherit; }
+    .send-btn { width: 34px; height: 34px; border-radius: 50%; border: none; background: #fff; color: #000; font-size: 16px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+
+    .panel-scroll { flex: 1; overflow-y: auto; padding: 16px; }
+    .panel-box { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+    .card { background: var(--sidebar); border: 1px solid var(--border); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .btn { background: #fff; color: #000; border: none; border-radius: 10px; padding: 9px 14px; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+    .btn.secondary { background: var(--composer); color: var(--text); }
+    .file-row { display: flex; align-items: center; justify-content: space-between; padding: 11px 14px; background: var(--sidebar); border: 1px solid var(--border); border-radius: 10px; cursor: pointer; direction: ltr; font-size: 13.5px; }
+    pre.code-view { background: #050505; border: 1px solid var(--border); border-radius: 12px; padding: 14px; font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; white-space: pre-wrap; overflow-x: auto; direction: ltr; text-align: left; }
+    input[type="text"], input[type="password"], select { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text); direction: ltr; font-size: 13.5px; }
+
+    #backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 25; }
+    #backdrop.open { display: block; }
+    #authScreen {
+      position: fixed; inset: 0; background: var(--bg);
+      display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 60;
+    }
+    #authScreen.hidden { display: none; }
+    #authScreen .card { width: 100%; max-width: 400px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div id="authScreen">
+    <div class="card">
+      <h2>Antigravity Remote</h2>
+      <p id="authMsg" style="font-size:13.5px;color:var(--muted);">سجل الدخول بنفس حساب Google المرتبط بجهاز الكمبيوتر الخاص بك.</p>
+      <button id="googleLoginBtn" class="btn" onclick="loginWithGoogle()">تسجيل الدخول بـ Google</button>
+      <button id="retryBtn" class="btn secondary" style="display:none;" onclick="bootstrapSession()">إعادة التحقق من اتصال الكمبيوتر</button>
+      <button id="logoutBtn" class="btn secondary" style="display:none;" onclick="logout()">تبديل الحساب</button>
+    </div>
+  </div>
+
+  <div id="backdrop" onclick="toggleSidebar(true)"></div>
+
+  <aside id="sidebar">
+    <div class="side-top">
+      <div class="side-brand">
+        <span id="connDot" class="dot"></span>
+        <span>Antigravity</span>
+      </div>
+      <button class="icon-btn" onclick="toggleSidebar(true)">✕</button>
+    </div>
+    <div class="side-nav">
+      <button class="nav-item" onclick="startNewChat()">✏️ محادثة جديدة</button>
+      <button class="nav-item" onclick="switchView('files')">📁 مدير الملفات</button>
+      <button class="nav-item" onclick="switchView('settings')">⚙️ المسار والسكون</button>
+      <button class="nav-item" onclick="logout()">🚪 تسجيل الخروج</button>
+    </div>
+    <div class="side-label">المحادثات السابقة</div>
+    <div id="recentsList" class="recents"></div>
+    <div class="side-footer">
+      <div id="userEmailSide">--</div>
+      <div id="sleepSideText">Awake: --:--</div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header>
+      <div class="header-left">
+        <button class="icon-btn" onclick="toggleSidebar()">☰</button>
+        <span id="headerTitle" style="font-weight:600;font-size:15px;">Antigravity</span>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <span id="queuePill" class="pill" style="display:none;color:#fde68a;">Queue: 0</span>
+        <span id="sleepPill" class="pill">Awake: --:--</span>
+      </div>
+    </header>
+
+    <section id="view-chat" class="view active">
+      <div id="chatScroll" class="chat-scroll">
+        <div class="chat-container">
+          <div id="emptyState" class="empty-state">
+            <h1>نبدأ منين النهاردة؟</h1>
+          </div>
+          <div id="messages" style="display:flex;flex-direction:column;gap:16px;"></div>
+        </div>
+      </div>
+      <div class="composer-wrap">
+        <div class="composer-inner">
+          <div id="attachBar" class="attach-bar"></div>
+          <div class="composer-row">
+            <input id="fileUploadInput" type="file" multiple style="display:none" onchange="uploadSelectedFiles(this.files)" />
+            <button class="icon-btn" onclick="document.getElementById('fileUploadInput').click()">＋</button>
+            <textarea id="promptInput" rows="1" placeholder="اسأل Antigravity..."></textarea>
+            <button id="stopBtn" class="send-btn" style="display:none;" onclick="stopTurn()">■</button>
+            <button id="sendBtn" class="send-btn" onclick="sendPrompt()">↑</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-files" class="view">
+      <div class="panel-scroll">
+        <div class="panel-box">
+          <div class="row">
+            <button class="btn secondary" onclick="switchView('chat')">← العودة للشات</button>
+            <button class="btn secondary" onclick="loadFiles('')">الرئيسية</button>
+            <span id="cwdLabel" class="pill">/</span>
+          </div>
+          <div id="filesList" style="display:flex;flex-direction:column;gap:8px;"></div>
+          <div id="previewActions" class="row" style="display:none;">
+            <button id="downloadFileBtn" class="btn">تحميل / حفظ الملف</button>
+          </div>
+          <pre id="filePreview" class="code-view" style="display:none;"></pre>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-settings" class="view">
+      <div class="panel-scroll">
+        <div class="panel-box">
+          <div class="row">
+            <strong>إعدادات السيرفر والمسار</strong>
+            <button class="btn secondary" onclick="switchView('chat')">← العودة للشات</button>
+          </div>
+          <div class="card">
+            <strong>مسار العمل (Workspace)</strong>
+            <input id="workspaceInput" type="text" />
+            <select id="modeSelect">
+              <option value="accept-edits">accept-edits (تعديل الملفات تلقائياً)</option>
+              <option value="plan">plan (تخطيط فقط)</option>
+            </select>
+            <button class="btn" onclick="saveWorkspace()">حفظ</button>
+          </div>
+          <div class="card">
+            <div class="row">
+              <strong>منع السكون (Windows Awake)</strong>
+              <span id="sleepStateText" class="pill">--</span>
+            </div>
+            <div class="row">
+              <button class="btn" onclick="extendSleep(7)">تجديد 7 ساعات</button>
+              <button class="btn secondary" onclick="toggleDisplay()">تبديل إبقاء الشاشة</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const SUPABASE_URL = "https://jpivlsdeiompylybbgyg.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpwaXZsc2RlaW9tcHlseWJiZ3lnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTU3Mzc4NjEsImV4cCI6MjExMTMxMzg2MX0.tw6-333dknhvOtoMXf81DE-gbY-Y09agbptZZSEXZK8";
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    let SERVER_URL = "";
+    let SB_TOKEN = "";
+    let ws = null;
+    let streamingEl = null;
+    let liveMetaEl = null;
+    let keepDisplayOn = false;
+    let pendingAttachments = [];
+    let currentPreviewPath = "";
+
+    if (window.innerWidth <= 768) document.getElementById("sidebar").classList.add("collapsed");
+
+    async function loginWithGoogle() {
+      await sb.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: window.location.origin + window.location.pathname }
+      });
+    }
+
+    async function logout() {
+      await sb.auth.signOut();
+      location.reload();
+    }
+
+    async function bootstrapSession() {
+      const authScreen = document.getElementById("authScreen");
+      const authMsg = document.getElementById("authMsg");
+      const retryBtn = document.getElementById("retryBtn");
+      const logoutBtn = document.getElementById("logoutBtn");
+      const googleBtn = document.getElementById("googleLoginBtn");
+
+      const { data: { session } } = await sb.auth.getSession();
+      if (!session) {
+        authScreen.classList.remove("hidden");
+        googleBtn.style.display = "inline-block";
+        retryBtn.style.display = "none";
+        logoutBtn.style.display = "none";
+        return;
+      }
+
+      SB_TOKEN = session.access_token;
+      document.getElementById("userEmailSide").textContent = session.user.email;
+      googleBtn.style.display = "none";
+      retryBtn.style.display = "inline-block";
+      logoutBtn.style.display = "inline-block";
+      authMsg.textContent = `مرحباً ${session.user.email} — جاري البحث عن جهاز الكمبيوتر الخاص بك...`;
+
+      const { data: device } = await sb
+        .from("remote_devices")
+        .select("*")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
+
+      if (!device || !device.tunnel_url) {
+        authMsg.textContent = `لم يتم العثور على سيرفر مرتبط بالحساب (${session.user.email}). تأكد من تشغيل السكربت على الكمبيوتر وربطه بنفس حساب جوجل.`;
+        return;
+      }
+
+      try {
+        const res = await fetch(`${device.tunnel_url}/api/status?sb_token=${encodeURIComponent(SB_TOKEN)}`);
+        if (!res.ok) throw new Error("Unauthorized or offline");
+        SERVER_URL = device.tunnel_url;
+        authScreen.classList.add("hidden");
+        connectWS();
+        refreshStatus();
+        loadChats();
+      } catch {
+        authMsg.textContent = `تعذر الوصول إلى جهازك (${device.device_name}). تأكد أن السيرفر شغال على الكمبيوتر وأنك مسجل بنفس حساب Google.`;
+      }
+    }
+
+    function toggleSidebar(forceClose = false) {
+      const sbEl = document.getElementById("sidebar");
+      const bd = document.getElementById("backdrop");
+      const collapsed = forceClose ? true : !sbEl.classList.contains("collapsed");
+      sbEl.classList.toggle("collapsed", collapsed);
+      if (window.innerWidth <= 768) bd.classList.toggle("open", !collapsed);
+    }
+
+    function switchView(name) {
+      document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+      document.getElementById("view-" + name).classList.add("active");
+      if (window.innerWidth <= 768) toggleSidebar(true);
+      if (name === "files") loadFiles("");
+      if (name === "settings") refreshStatus();
+    }
+
+    function updateEmptyState() {
+      document.getElementById("emptyState").style.display = document.getElementById("messages").children.length > 0 ? "none" : "flex";
+    }
+
+    function appendMessage(m) {
+      const box = document.getElementById("messages");
+      const wrap = document.createElement("div");
+      wrap.className = "msg " + m.role;
+      if (m.id) wrap.dataset.msgId = m.id;
+      const meta = (m.tools || []).map(t => `🔧 ${t.name}`);
+      if (meta.length) {
+        const mb = document.createElement("div");
+        mb.className = "meta-box";
+        mb.textContent = meta.join("\n");
+        wrap.appendChild(mb);
+      }
+      const span = document.createElement("span");
+      span.textContent = m.text || "";
+      wrap.appendChild(span);
+      if (m.queued) {
+        const qb = document.createElement("div");
+        qb.className = "q-badge";
+        qb.textContent = "⏳ في الطابور";
+        wrap.appendChild(qb);
+      }
+      box.appendChild(wrap);
+      updateEmptyState();
+      document.getElementById("chatScroll").scrollTop = document.getElementById("chatScroll").scrollHeight;
+    }
+
+    function connectWS() {
+      if (!SERVER_URL || !SB_TOKEN) return;
+      const wsUrl = SERVER_URL.replace(/^https:/, "wss:").replace(/^http:/, "ws:") + `/ws/chat?sb_token=${encodeURIComponent(SB_TOKEN)}`;
+      ws = new WebSocket(wsUrl);
+      ws.onopen = () => document.getElementById("connDot").classList.add("online");
+      ws.onclose = () => {
+        document.getElementById("connDot").classList.remove("online");
+        setTimeout(connectWS, 3000);
+      };
+      ws.onmessage = (ev) => {
+        const data = JSON.parse(ev.data);
+        if (data.type === "history") {
+          document.getElementById("messages").innerHTML = "";
+          (data.messages || []).forEach(appendMessage);
+          document.getElementById("headerTitle").textContent = data.title || "Antigravity";
+          updateEmptyState();
+          document.getElementById("stopBtn").style.display = data.busy ? "inline-flex" : "none";
+        } else if (data.type === "message") {
+          appendMessage(data.message);
+        } else if (data.type === "thought") {
+          ensureLiveBubble();
+          liveMetaEl.style.display = "block";
+          liveMetaEl.textContent += `💭 ${data.text}\n`;
+        } else if (data.type === "tool") {
+          ensureLiveBubble();
+          liveMetaEl.style.display = "block";
+          liveMetaEl.textContent += `🔧 ${data.tool.name}\n`;
+        } else if (data.type === "token") {
+          ensureLiveBubble();
+          streamingEl.textContent += data.text;
+          document.getElementById("chatScroll").scrollTop = document.getElementById("chatScroll").scrollHeight;
+        } else if (data.type === "done") {
+          streamingEl = null; liveMetaEl = null; refreshStatus(); loadChats();
+        } else if (data.type === "status") {
+          document.getElementById("stopBtn").style.display = data.busy ? "inline-flex" : "none";
+          if (data.active_msg_id) {
+            const el = document.querySelector(`[data-msg-id="${data.active_msg_id}"] .q-badge`);
+            if (el) el.remove();
+          }
+        } else if (data.type === "queue") {
+          const p = document.getElementById("queuePill");
+          p.style.display = (data.count || 0) > 0 ? "inline-block" : "none";
+          p.textContent = `Queue: ${data.count || 0}`;
+        } else if (data.type === "error") {
+          appendMessage({ role: "error", text: data.message });
+          streamingEl = null; liveMetaEl = null;
+        }
+      };
+    }
+
+    function ensureLiveBubble() {
+      if (streamingEl) return;
+      const box = document.getElementById("messages");
+      const wrap = document.createElement("div");
+      wrap.className = "msg assistant";
+      liveMetaEl = document.createElement("div");
+      liveMetaEl.className = "meta-box";
+      liveMetaEl.style.display = "none";
+      streamingEl = document.createElement("span");
+      wrap.appendChild(liveMetaEl);
+      wrap.appendChild(streamingEl);
+      box.appendChild(wrap);
+      updateEmptyState();
+    }
+
+    function sendPrompt() {
+      const inp = document.getElementById("promptInput");
+      let text = inp.value.trim();
+      if (pendingAttachments.length) {
+        const paths = pendingAttachments.map(a => a.path).join(", ");
+        text = (text ? text + "\n\n" : "") + `[Attached files saved on PC: ${paths}]`;
+        pendingAttachments = [];
+        renderAttachments();
+      }
+      if (!text || !ws || ws.readyState !== 1) return;
+      ws.send(JSON.stringify({ type: "chat", text }));
+      inp.value = "";
+    }
+
+    function stopTurn() { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "stop" })); }
+    document.getElementById("promptInput").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendPrompt(); }
+    });
+
+    async function uploadSelectedFiles(files) {
+      for (const f of files) {
+        const fd = new FormData();
+        fd.append("file", f);
+        const res = await fetch(`${SERVER_URL}/api/upload?sb_token=${encodeURIComponent(SB_TOKEN)}`, { method: "POST", body: fd });
+        if (res.ok) pendingAttachments.push(await res.json());
+      }
+      renderAttachments();
+      document.getElementById("fileUploadInput").value = "";
+    }
+
+    function renderAttachments() {
+      const bar = document.getElementById("attachBar");
+      bar.innerHTML = "";
+      bar.classList.toggle("open", pendingAttachments.length > 0);
+      pendingAttachments.forEach((a, idx) => {
+        const chip = document.createElement("span");
+        chip.className = "pill"; chip.style.cursor = "pointer";
+        chip.textContent = `📎 ${a.filename} ✕`;
+        chip.onclick = () => { pendingAttachments.splice(idx, 1); renderAttachments(); };
+        bar.appendChild(chip);
+      });
+    }
+
+    async function api(path, opts = {}) {
+      const sep = path.includes("?") ? "&" : "?";
+      const res = await fetch(`${SERVER_URL}${path}${sep}sb_token=${encodeURIComponent(SB_TOKEN)}`, opts);
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    }
+
+    function fmtSeconds(sec) {
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      return `${h}h ${String(m).padStart(2, "0")}m`;
+    }
+
+    async function refreshStatus() {
+      if (!SERVER_URL) return;
+      try {
+        const st = await api("/api/status");
+        keepDisplayOn = st.sleep.keep_display_on;
+        const txt = st.sleep.active ? `Awake: ${fmtSeconds(st.sleep.remaining_seconds)}` : "Sleep Allowed";
+        document.getElementById("sleepPill").textContent = txt;
+        document.getElementById("sleepSideText").textContent = txt;
+        document.getElementById("sleepStateText").textContent = `${txt} | Screen: ${keepDisplayOn ? "Always On" : "Can Turn Off"}`;
+        document.getElementById("workspaceInput").value = st.workspace;
+        document.getElementById("modeSelect").value = st.agy_mode || "accept-edits";
+      } catch {}
+    }
+
+    async function saveWorkspace() {
+      await api("/api/workspace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace: document.getElementById("workspaceInput").value.trim(), agy_mode: document.getElementById("modeSelect").value })
+      });
+      alert("تم التحديث");
+    }
+
+    async function loadChats() {
+      if (!SERVER_URL) return;
+      const data = await api("/api/chats");
+      const list = document.getElementById("recentsList");
+      list.innerHTML = "";
+      data.chats.forEach(c => {
+        const btn = document.createElement("button");
+        btn.className = "recent-item" + (c.id === data.current_id ? " active" : "");
+        const icon = c.source === "ide" ? "🖥️" : "💬";
+        const label = document.createElement("span");
+        label.textContent = c.title;
+        btn.innerHTML = `<span style="flex:0 0 auto;font-size:12px;">${icon}</span>`;
+        btn.appendChild(label);
+        btn.onclick = async () => {
+          await api("/api/chats/select", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ conversation_id: c.id, source: c.source })
+          });
+          switchView("chat");
+          loadChats();
+        };
+        list.appendChild(btn);
+      });
+    }
+
+    async function startNewChat() {
+      await api("/api/chats/select", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversation_id: null }) });
+      switchView("chat");
+      loadChats();
+    }
+
+    async function extendSleep(hours) { await api("/api/sleep", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ extend_hours: hours }) }); refreshStatus(); }
+    async function toggleDisplay() { await api("/api/sleep", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keep_display_on: !keepDisplayOn }) }); refreshStatus(); }
+
+    async function loadFiles(path) {
+      const data = await api(`/api/files?path=${encodeURIComponent(path)}`);
+      document.getElementById("cwdLabel").textContent = "/" + (data.cwd || "");
+      const list = document.getElementById("filesList");
+      const prev = document.getElementById("filePreview");
+      const acts = document.getElementById("previewActions");
+      prev.style.display = "none"; acts.style.display = "none"; list.innerHTML = "";
+      data.items.forEach(item => {
+        const el = document.createElement("div");
+        el.className = "file-row";
+        el.textContent = (item.is_dir ? "📁 " : "📄 ") + item.name;
+        el.onclick = async () => {
+          if (item.is_dir) loadFiles(item.path);
+          else {
+            currentPreviewPath = item.path;
+            acts.style.display = "flex";
+            document.getElementById("downloadFileBtn").onclick = () => window.open(`${SERVER_URL}/api/download?path=${encodeURIComponent(currentPreviewPath)}&sb_token=${encodeURIComponent(SB_TOKEN)}`, "_blank");
+            try { const f = await api(`/api/file?path=${encodeURIComponent(item.path)}`); prev.style.display = "block"; prev.textContent = f.content; }
+            catch { prev.style.display = "block"; prev.textContent = "(ملف ثنائي أو كبير — اضغط زر التحميل لحفظه)"; }
+          }
+        };
+        list.appendChild(el);
+      });
+    }
+
+    bootstrapSession();
+    setInterval(refreshStatus, 30000);
+  </script>
+</body>
+</html>

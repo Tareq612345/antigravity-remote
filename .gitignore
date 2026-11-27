@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+config.json
+chats.json
+_remote_uploads/
+*.pyc
