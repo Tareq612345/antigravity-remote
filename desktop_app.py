@@ -26,7 +26,8 @@ def create_tray_icon_image() -> Image.Image:
 
 def run_uvicorn() -> None:
     port = int(server.config.get("port", 8765))
-    uvicorn.run(server.app, host="0.0.0.0", port=port, log_level="warning")
+    host = server.config.get("bind_host", "127.0.0.1")
+    uvicorn.run(server.app, host=host, port=port, log_level="warning", access_log=False)
 
 
 def main() -> None:

@@ -504,8 +504,11 @@
 
   <script>
     const urlParams = new URLSearchParams(location.search);
-    if (urlParams.get("token")) localStorage.setItem("ag_token", urlParams.get("token"));
-    let token = localStorage.getItem("ag_token") || "";
+    if (urlParams.get("token")) {
+      sessionStorage.setItem("ag_token", urlParams.get("token"));
+      history.replaceState({}, document.title, location.pathname);
+    }
+    let token = sessionStorage.getItem("ag_token") || "";
     let ws = null;
     let streamingEl = null;
     let liveMetaEl = null;
@@ -534,7 +537,7 @@
     function openAuth() { document.getElementById("authModal").classList.add("open"); }
     function saveToken() {
       token = document.getElementById("tokenInput").value.trim();
-      localStorage.setItem("ag_token", token);
+      sessionStorage.setItem("ag_token", token);
       document.getElementById("authModal").classList.remove("open");
       connectWS();
       refreshStatus();
@@ -576,8 +579,11 @@
     function connectWS() {
       if (!token) { openAuth(); return; }
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
-      ws = new WebSocket(`${proto}//${location.host}/ws/chat?token=${encodeURIComponent(token)}`);
-      ws.onopen = () => document.getElementById("connDot").classList.add("online");
+      ws = new WebSocket(`${proto}//${location.host}/ws/chat`);
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: "auth", token }));
+        document.getElementById("connDot").classList.add("online");
+      };
       ws.onclose = (ev) => {
         document.getElementById("connDot").classList.remove("online");
         if (ev.code === 4001) openAuth();
@@ -687,7 +693,11 @@
       for (const f of files) {
         const fd = new FormData();
         fd.append("file", f);
-        const res = await fetch(`/api/upload?token=${encodeURIComponent(token)}`, { method: "POST", body: fd });
+        const res = await fetch(`/api/upload`, {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${token}` },
+          body: fd
+        });
         if (res.ok) pendingAttachments.push(await res.json());
       }
       renderAttachments();
@@ -709,8 +719,8 @@
     }
 
     async function api(path, opts = {}) {
-      const sep = path.includes("?") ? "&" : "?";
-      const res = await fetch(`${path}${sep}token=${encodeURIComponent(token)}`, opts);
+      const headers = Object.assign({}, opts.headers || {}, { "Authorization": `Bearer ${token}` });
+      const res = await fetch(`${path}`, Object.assign({}, opts, { headers }));
       if (res.status === 401) { openAuth(); throw new Error("Unauthorized"); }
       if (!res.ok) throw new Error(await res.text());
       return res.json();
@@ -832,8 +842,17 @@
           else {
             currentPreviewPath = item.path;
             acts.style.display = "flex";
-            document.getElementById("downloadFileBtn").onclick = () => {
-              window.open(`/api/download?path=${encodeURIComponent(currentPreviewPath)}&token=${encodeURIComponent(token)}`, "_blank");
+            document.getElementById("downloadFileBtn").onclick = async () => {
+              const r = await fetch(`/api/download?path=${encodeURIComponent(currentPreviewPath)}`, {
+                headers: { "Authorization": `Bearer ${token}` }
+              });
+              if (!r.ok) return;
+              const blob = await r.blob();
+              const a = document.createElement("a");
+              a.href = URL.createObjectURL(blob);
+              a.download = item.name;
+              a.click();
+              URL.revokeObjectURL(a.href);
             };
             try {
               const f = await api(`/api/file?path=${encodeURIComponent(item.path)}`);

@@ -232,8 +232,8 @@
             <strong data-i18n="workspaceTitle">Workspace & Mode</strong>
             <input id="workspaceInput" type="text" style="direction:ltr;" />
             <select id="modeSelect" style="direction:ltr;">
-              <option value="accept-edits">accept-edits</option>
-              <option value="plan">plan</option>
+              <option value="plan">plan (Safe: read &amp; plan only)</option>
+              <option value="accept-edits">accept-edits (⚠️ Auto-edits files — use with care)</option>
             </select>
             <button class="btn" onclick="saveWorkspace()" data-i18n="save">Save</button>
           </div>
@@ -381,7 +381,9 @@
 
       setAuthBusy(true, lang === "ar" ? `جاري الاتصال بـ ${device.device_name}...` : `Connecting to ${device.device_name}...`);
       try {
-        const res = await fetch(`${device.tunnel_url}/api/status?sb_token=${encodeURIComponent(SB_TOKEN)}`);
+        const res = await fetch(`${device.tunnel_url}/api/status`, {
+          headers: { "Authorization": `Bearer ${SB_TOKEN}` }
+        });
         if (!res.ok) throw new Error("Unauthorized or offline");
         SERVER_URL = device.tunnel_url;
         setAuthBusy(false);
@@ -443,9 +445,12 @@
 
     function connectWS() {
       if (!SERVER_URL || !SB_TOKEN) return;
-      const wsUrl = SERVER_URL.replace(/^https:/, "wss:").replace(/^http:/, "ws:") + `/ws/chat?sb_token=${encodeURIComponent(SB_TOKEN)}`;
+      const wsUrl = SERVER_URL.replace(/^https:/, "wss:").replace(/^http:/, "ws:") + `/ws/chat`;
       ws = new WebSocket(wsUrl);
-      ws.onopen = () => document.getElementById("connDot").classList.add("online");
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: "auth", sb_token: SB_TOKEN }));
+        document.getElementById("connDot").classList.add("online");
+      };
       ws.onclose = () => {
         document.getElementById("connDot").classList.remove("online");
         setTimeout(connectWS, 3000);
@@ -529,7 +534,11 @@
       for (const f of files) {
         const fd = new FormData();
         fd.append("file", f);
-        const res = await fetch(`${SERVER_URL}/api/upload?sb_token=${encodeURIComponent(SB_TOKEN)}`, { method: "POST", body: fd });
+        const res = await fetch(`${SERVER_URL}/api/upload`, {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${SB_TOKEN}` },
+          body: fd
+        });
         if (res.ok) pendingAttachments.push(await res.json());
       }
       renderAttachments();
@@ -550,8 +559,8 @@
     }
 
     async function api(path, opts = {}) {
-      const sep = path.includes("?") ? "&" : "?";
-      const res = await fetch(`${SERVER_URL}${path}${sep}sb_token=${encodeURIComponent(SB_TOKEN)}`, opts);
+      const headers = Object.assign({}, opts.headers || {}, { "Authorization": `Bearer ${SB_TOKEN}` });
+      const res = await fetch(`${SERVER_URL}${path}`, Object.assign({}, opts, { headers }));
       if (!res.ok) throw new Error(await res.text());
       return res.json();
     }
@@ -636,7 +645,18 @@
           else {
             currentPreviewPath = item.path;
             acts.style.display = "flex";
-            document.getElementById("downloadFileBtn").onclick = () => window.open(`${SERVER_URL}/api/download?path=${encodeURIComponent(currentPreviewPath)}&sb_token=${encodeURIComponent(SB_TOKEN)}`, "_blank");
+            document.getElementById("downloadFileBtn").onclick = async () => {
+              const r = await fetch(`${SERVER_URL}/api/download?path=${encodeURIComponent(currentPreviewPath)}`, {
+                headers: { "Authorization": `Bearer ${SB_TOKEN}` }
+              });
+              if (!r.ok) return;
+              const blob = await r.blob();
+              const a = document.createElement("a");
+              a.href = URL.createObjectURL(blob);
+              a.download = item.name;
+              a.click();
+              URL.revokeObjectURL(a.href);
+            };
             try { const f = await api(`/api/file?path=${encodeURIComponent(item.path)}`); prev.style.display = "block"; prev.textContent = f.content; }
             catch { prev.style.display = "block"; prev.textContent = "(Binary or large file — click Download)"; }
           }

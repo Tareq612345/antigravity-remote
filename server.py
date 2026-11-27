@@ -1,21 +1,24 @@
 import asyncio
 import json
+import os
+import re
 import secrets
 import socket
 import sys
 import time
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from ide_transcript_watcher import list_ide_chats, parse_transcript, watch_ide_transcript
+from ide_transcript_watcher import is_valid_cid, list_ide_chats, parse_transcript, watch_ide_transcript
 from sleep_manager import SleepManager
 from tunnel_and_auth import SUPABASE_ANON_KEY, SUPABASE_URL, SupabaseAuthClient, TunnelManager
 
@@ -26,21 +29,51 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 LEGACY_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = (LEGACY_DIR / "config.json") if (LEGACY_DIR / "config.json").exists() else (DATA_DIR / "config.json")
 CHATS_PATH = (LEGACY_DIR / "chats.json") if (LEGACY_DIR / "chats.json").exists() else (DATA_DIR / "chats.json")
+AUDIT_LOG_PATH = DATA_DIR / "audit.log"
 AGY_CONVERSATIONS_DIR = Path.home() / ".gemini" / "antigravity-cli" / "conversations"
 DEFAULT_AGY_PATH = str(Path.home() / ".gemini" / "bin" / "agy.exe")
+
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+ALLOWED_UPLOAD_EXTS = {
+    ".txt", ".md", ".py", ".js", ".ts", ".json", ".csv", ".log",
+    ".png", ".jpg", ".jpeg", ".webp", ".gif",
+    ".mp3", ".wav", ".m4a", ".ogg", ".pdf",
+}
+DEFAULT_ALLOWED_ORIGINS = [
+    "https://tareq612345.github.io",
+    "http://127.0.0.1:8765",
+    "http://localhost:8765",
+]
+
+
+def audit_log(event: str, detail: str = "") -> None:
+    try:
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        line = f"[{ts}] {event}: {detail}\n"
+        with AUDIT_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(line)
+    except Exception:
+        pass
 
 
 def load_or_create_config() -> dict[str, Any]:
     if CONFIG_PATH.exists():
         cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
         cfg.setdefault("agy_path", DEFAULT_AGY_PATH)
-        cfg.setdefault("agy_mode", "accept-edits")
+        cfg.setdefault("agy_mode", "plan")
+        cfg.setdefault("bind_host", "127.0.0.1")
+        cfg.setdefault("allowed_origins", DEFAULT_ALLOWED_ORIGINS)
+        cfg.setdefault("allowed_workspaces", [cfg.get("workspace", str(Path.home() / "Desktop"))])
         return cfg
+    default_ws = str(Path.home() / "Desktop")
     cfg = {
-        "token": secrets.token_urlsafe(16),
+        "token": secrets.token_urlsafe(24),
         "agy_path": DEFAULT_AGY_PATH,
-        "agy_mode": "accept-edits",
-        "workspace": str(Path.home() / "Desktop"),
+        "agy_mode": "plan",
+        "workspace": default_ws,
+        "allowed_workspaces": [default_ws],
+        "allowed_origins": DEFAULT_ALLOWED_ORIGINS,
+        "bind_host": "127.0.0.1",
         "sleep_timeout_hours": 7,
         "keep_display_on": False,
         "port": 8765,
@@ -75,6 +108,27 @@ sb_auth = SupabaseAuthClient()
 tunnel_manager = TunnelManager(local_port=int(config.get("port", 8765)), data_dir=DATA_DIR)
 
 
+class RateLimiter:
+    def __init__(self, max_requests: int, window_seconds: int = 60) -> None:
+        self.max_requests = max_requests
+        self.window = window_seconds
+        self._hits: dict[str, deque[float]] = defaultdict(deque)
+
+    def check(self, key: str) -> bool:
+        now = time.monotonic()
+        q = self._hits[key]
+        while q and now - q[0] > self.window:
+            q.popleft()
+        if len(q) >= self.max_requests:
+            return False
+        q.append(now)
+        return True
+
+
+api_limiter = RateLimiter(max_requests=90, window_seconds=60)
+auth_limiter = RateLimiter(max_requests=10, window_seconds=60)
+
+
 class HubState:
     def __init__(self) -> None:
         self.clients: set[WebSocket] = set()
@@ -88,6 +142,20 @@ class HubState:
         self._worker_task: asyncio.Task[None] | None = None
         self._ide_watch_task: asyncio.Task[None] | None = None
         self.ide_mirror_id: str | None = None
+        self.pairing_codes: dict[str, float] = {}
+
+    def issue_pairing_code(self) -> str:
+        now = time.monotonic()
+        self.pairing_codes = {k: exp for k, exp in self.pairing_codes.items() if exp > now}
+        code = secrets.token_urlsafe(18)
+        self.pairing_codes[code] = now + 300  # 5 minutes
+        return code
+
+    def consume_pairing_code(self, code: str | None) -> bool:
+        if not code:
+            return False
+        exp = self.pairing_codes.pop(code, None)
+        return bool(exp and exp > time.monotonic())
 
     async def broadcast(self, payload: dict[str, Any]) -> None:
         dead: list[WebSocket] = []
@@ -101,7 +169,7 @@ class HubState:
             self.clients.discard(ws)
 
     def persist_current_chat(self) -> None:
-        if not self.conversation_id:
+        if not self.conversation_id or not is_valid_cid(self.conversation_id):
             return
         title = "New Chat"
         for m in self.history:
@@ -155,7 +223,7 @@ def sync_tunnel_to_supabase(public_url: str | None = None) -> bool:
             url,
             socket.gethostname(),
         )
-        print(f"[Supabase] Synced device ({user['email']}) -> {url} (ok={ok})")
+        audit_log("supabase_sync", f"email={user['email']} ok={ok}")
         return ok
     return False
 
@@ -165,6 +233,7 @@ async def lifespan(_: FastAPI):
     sleep_manager.start()
     tunnel_manager.start(on_url_ready=sync_tunnel_to_supabase)
     hub._worker_task = asyncio.create_task(hub.worker_loop())
+    audit_log("server_start", f"bind={config.get('bind_host', '127.0.0.1')}:{config.get('port', 8765)}")
     yield
     if hub._worker_task:
         hub._worker_task.cancel()
@@ -179,16 +248,27 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="Antigravity Remote", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=config.get("allowed_origins", DEFAULT_ALLOWED_ORIGINS),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type", "X-Access-Token", "X-Supabase-Token"],
 )
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-def is_authorized(token: str | None, sb_token: str | None) -> bool:
-    if token and token == config["token"]:
+def client_ip(request: Request) -> str:
+    return (request.client.host if request.client else "") or "unknown"
+
+
+def is_local_client(request: Request) -> bool:
+    # Only trust direct loopback connections (ignore X-Forwarded-For from tunnels)
+    host = client_ip(request)
+    has_proxy_hdr = bool(request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for"))
+    return host in ("127.0.0.1", "::1", "localhost", "testclient") and not has_proxy_hdr
+
+
+def check_credentials(local_token: str | None, sb_token: str | None) -> bool:
+    if local_token and secrets.compare_digest(local_token, config["token"]):
         return True
     if sb_token and config.get("owner_email"):
         user = sb_auth.get_user(sb_token)
@@ -197,22 +277,23 @@ def is_authorized(token: str | None, sb_token: str | None) -> bool:
     return False
 
 
-def verify_token(token: str | None, sb_token: str | None = None) -> None:
-    if not is_authorized(token, sb_token):
-        raise HTTPException(status_code=401, detail="Invalid access token or Google account mismatch")
+def verify_request(request: Request) -> None:
+    ip = client_ip(request)
+    if not api_limiter.check(ip):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
 
+    auth_hdr = request.headers.get("authorization") or ""
+    bearer = auth_hdr[7:].strip() if auth_hdr.lower().startswith("bearer ") else None
+    local_tok = request.headers.get("x-access-token") or bearer
+    sb_tok = request.headers.get("x-supabase-token") or bearer
 
-def get_local_ips() -> list[str]:
-    ips: list[str] = []
-    try:
-        hostname = socket.gethostname()
-        for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
-            ip = info[4][0]
-            if not ip.startswith("127.") and ip not in ips:
-                ips.append(ip)
-    except Exception:
-        pass
-    return ips
+    if check_credentials(local_tok, sb_tok):
+        return
+
+    if not auth_limiter.check(f"fail:{ip}"):
+        raise HTTPException(status_code=429, detail="Too many failed auth attempts")
+    audit_log("auth_failure", f"ip={ip} path={request.url.path}")
+    raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 @app.get("/")
@@ -226,7 +307,10 @@ async def desktop_ui() -> FileResponse:
 
 
 @app.get("/pc-login")
-async def pc_login_page() -> HTMLResponse:
+async def pc_login_page(request: Request) -> HTMLResponse:
+    if not is_local_client(request):
+        raise HTTPException(status_code=403, detail="PC pairing is only allowed from localhost")
+    pair_code = hub.issue_pairing_code()
     html = f"""<!DOCTYPE html><html lang="en" dir="ltr"><head><meta charset="utf-8"><title>Link PC — Antigravity Remote</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
@@ -235,7 +319,7 @@ async def pc_login_page() -> HTMLResponse:
       .spinner{{width:28px;height:28px;border:3px solid rgba(255,255,255,.15);border-top-color:#10a37f;border-radius:50%;animation:spin .8s linear infinite;display:none;}}
       @keyframes spin{{to{{transform:rotate(360deg)}}}}
       .btn{{padding:10px 20px;border-radius:10px;border:0;background:#fff;color:#000;font-weight:600;cursor:pointer;font-size:14px;}}
-      .link-btn{{background:transparent;border:1px solid rgba(255,255,255,.15);color:#9b9b9b;padding:7px 14px;border-radius:8px;cursor:pointer;font-size:12.5px;display:none;}}
+      .link-btn{{background:transparent;border:1px solid rgba(255,255,255,.15);color:#9b9b9b;padding:7px 14px;border-radius:8px;cursor:pointer;font-size:12.5px;}}
       .link-btn:hover{{color:#fff;border-color:rgba(255,255,255,.35);}}
     </style></head>
     <body>
@@ -245,10 +329,11 @@ async def pc_login_page() -> HTMLResponse:
       <p id="msg" style="color:#9b9b9b;font-size:13.5px;margin:0;line-height:1.5;">Sign in with the same Google account you use on your mobile browser.</p>
       <button id="loginBtn" class="btn" onclick="loginGoogle()">Sign in with Google</button>
       <div style="width:100%;border-top:1px solid rgba(255,255,255,.08);padding-top:12px;display:none;" id="footerActions">
-        <button id="switchBtn" class="link-btn" style="display:inline-block;" onclick="switchAccount()">Switch Account / Sign Out</button>
+        <button class="link-btn" onclick="switchAccount()">Switch Account / Sign Out</button>
       </div>
     </div>
     <script>
+      const PAIR_CODE = "{pair_code}";
       const sb = supabase.createClient("{SUPABASE_URL}", "{SUPABASE_ANON_KEY}");
       const setBusy = (on, text) => {{
         document.getElementById('spinner').style.display = on ? 'block' : 'none';
@@ -269,17 +354,17 @@ async def pc_login_page() -> HTMLResponse:
         if (session) {{
           document.getElementById('loginBtn').style.display = 'none';
           setBusy(true, 'Verifying account ' + session.user.email + '...');
-          const r = await fetch('/api/pc-link?token={config["token"]}', {{
+          const r = await fetch('/api/pc-link', {{
             method: 'POST',
             headers: {{ 'Content-Type': 'application/json' }},
-            body: JSON.stringify({{ access_token: session.access_token, refresh_token: session.refresh_token }})
+            body: JSON.stringify({{ pair_code: PAIR_CODE, access_token: session.access_token, refresh_token: session.refresh_token }})
           }});
           if (r.ok) {{
             setBusy(false, '✅ PC linked successfully to ' + session.user.email + '. You can close this tab.');
             document.getElementById('title').textContent = 'PC Connected';
             document.getElementById('footerActions').style.display = 'block';
           }} else {{
-            setBusy(false, 'Failed to link PC. Please try signing in again.');
+            setBusy(false, 'Failed to link PC. Please refresh and try again.');
             document.getElementById('loginBtn').style.display = 'inline-block';
           }}
         }}
@@ -289,13 +374,22 @@ async def pc_login_page() -> HTMLResponse:
 
 
 class PcLinkBody(BaseModel):
+    pair_code: str
     access_token: str
     refresh_token: str
 
 
 @app.post("/api/pc-link")
-async def pc_link(body: PcLinkBody, token: str | None = Query(default=None)) -> JSONResponse:
-    verify_token(token)
+async def pc_link(request: Request, body: PcLinkBody) -> JSONResponse:
+    ip = client_ip(request)
+    if not auth_limiter.check(f"pclink:{ip}"):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+    if not is_local_client(request):
+        raise HTTPException(status_code=403, detail="PC pairing is only allowed from localhost")
+    if not hub.consume_pairing_code(body.pair_code):
+        audit_log("pc_link_failed", "invalid_or_expired_pair_code")
+        raise HTTPException(status_code=401, detail="Invalid or expired pairing code")
+
     user = sb_auth.get_user(body.access_token)
     if not user or not user.get("id") or not user.get("email"):
         raise HTTPException(status_code=401, detail="Invalid Supabase session")
@@ -304,23 +398,20 @@ async def pc_link(body: PcLinkBody, token: str | None = Query(default=None)) -> 
     config["owner_email"] = user["email"]
     save_config(config)
     synced = sync_tunnel_to_supabase()
-    return JSONResponse({"email": user["email"], "tunnel_url": tunnel_manager.public_url, "synced": synced})
+    audit_log("pc_link_success", f"email={user['email']} synced={synced}")
+    return JSONResponse({"email": user["email"], "synced": synced})
 
 
 @app.get("/api/status")
-async def get_status(token: str | None = Query(default=None), sb_token: str | None = Query(default=None)) -> JSONResponse:
-    verify_token(token, sb_token)
+async def get_status(request: Request) -> JSONResponse:
+    verify_request(request)
     st = sleep_manager.status()
     return JSONResponse(
         {
             "workspace": config["workspace"],
-            "agy_mode": config.get("agy_mode", "accept-edits"),
+            "agy_mode": config.get("agy_mode", "plan"),
             "owner_email": config.get("owner_email"),
             "tunnel_url": tunnel_manager.public_url,
-            "local_ips": get_local_ips(),
-            "port": config["port"],
-            "agy_exists": Path(config.get("agy_path", DEFAULT_AGY_PATH)).exists(),
-            "conversation_id": hub.conversation_id,
             "busy": hub.busy,
             "queue_count": len(hub.queue),
             "sleep": {
@@ -339,15 +430,24 @@ class WorkspaceUpdate(BaseModel):
 
 
 @app.post("/api/workspace")
-async def update_workspace(body: WorkspaceUpdate, token: str | None = Query(default=None), sb_token: str | None = Query(default=None)) -> JSONResponse:
-    verify_token(token, sb_token)
-    p = Path(body.workspace).expanduser()
-    if not p.exists() or not p.is_dir():
+async def update_workspace(request: Request, body: WorkspaceUpdate) -> JSONResponse:
+    verify_request(request)
+    target_real = os.path.realpath(os.path.expanduser(body.workspace))
+    if not os.path.isdir(target_real):
         raise HTTPException(status_code=400, detail="Directory does not exist")
-    config["workspace"] = str(p.resolve())
-    if body.agy_mode in ("auto", "accept-edits", "plan"):
+
+    allowed_list = [os.path.realpath(p) for p in config.get("allowed_workspaces", [])]
+    if not is_local_client(request) and target_real not in allowed_list:
+        audit_log("workspace_blocked", f"ip={client_ip(request)} target={target_real}")
+        raise HTTPException(status_code=403, detail="Workspace not in allowlist; add it from the local PC")
+
+    config["workspace"] = target_real
+    if target_real not in allowed_list:
+        config.setdefault("allowed_workspaces", []).append(target_real)
+    if body.agy_mode in ("accept-edits", "plan"):
         config["agy_mode"] = body.agy_mode
     save_config(config)
+    audit_log("workspace_update", f"workspace={target_real} mode={config['agy_mode']}")
     return JSONResponse({"workspace": config["workspace"], "agy_mode": config["agy_mode"]})
 
 
@@ -357,12 +457,13 @@ class SleepUpdate(BaseModel):
 
 
 @app.post("/api/sleep")
-async def update_sleep(body: SleepUpdate, token: str | None = Query(default=None), sb_token: str | None = Query(default=None)) -> JSONResponse:
-    verify_token(token, sb_token)
+async def update_sleep(request: Request, body: SleepUpdate) -> JSONResponse:
+    verify_request(request)
     if body.keep_display_on is not None:
         sleep_manager.set_keep_display(body.keep_display_on)
     if body.extend_hours is not None:
-        sleep_manager.touch(int(body.extend_hours * 3600))
+        hours = max(0.1, min(24.0, body.extend_hours))
+        sleep_manager.touch(int(hours * 3600))
     else:
         sleep_manager.touch()
     st = sleep_manager.status()
@@ -376,11 +477,13 @@ async def update_sleep(body: SleepUpdate, token: str | None = Query(default=None
 
 
 @app.get("/api/chats")
-async def list_chats(token: str | None = Query(default=None), sb_token: str | None = Query(default=None)) -> JSONResponse:
-    verify_token(token, sb_token)
+async def list_chats(request: Request) -> JSONResponse:
+    verify_request(request)
     items: dict[str, dict[str, Any]] = {}
 
     for cid, cdata in hub.chats_store.items():
+        if not is_valid_cid(cid):
+            continue
         items[cid] = {
             "id": cid,
             "title": cdata.get("title", cid[:8]),
@@ -392,6 +495,8 @@ async def list_chats(token: str | None = Query(default=None), sb_token: str | No
     if AGY_CONVERSATIONS_DIR.exists():
         for db in AGY_CONVERSATIONS_DIR.glob("*.db"):
             cid = db.stem
+            if not is_valid_cid(cid):
+                continue
             stat = db.stat()
             if cid not in items:
                 items[cid] = {
@@ -418,17 +523,20 @@ class ChatSelect(BaseModel):
 
 
 @app.post("/api/chats/select")
-async def select_chat(body: ChatSelect, token: str | None = Query(default=None), sb_token: str | None = Query(default=None)) -> JSONResponse:
-    verify_token(token, sb_token)
+async def select_chat(request: Request, body: ChatSelect) -> JSONResponse:
+    verify_request(request)
     if hub.busy:
         raise HTTPException(status_code=409, detail="Wait for current response or stop it first")
+
+    cid = body.conversation_id
+    if cid is not None and not is_valid_cid(cid):
+        raise HTTPException(status_code=400, detail="Invalid conversation ID")
 
     if hub._ide_watch_task:
         hub._ide_watch_task.cancel()
         hub._ide_watch_task = None
     hub.ide_mirror_id = None
 
-    cid = body.conversation_id
     title = None
     if body.source == "ide" and cid:
         hub.conversation_id = None
@@ -463,25 +571,26 @@ async def select_chat(body: ChatSelect, token: str | None = Query(default=None),
 
 
 def resolve_safe_path(rel_path: str) -> Path:
-    root = Path(config["workspace"]).resolve()
-    target = (root / rel_path).resolve()
-    if root != target and root not in target.parents:
+    root_real = os.path.realpath(config["workspace"])
+    target_real = os.path.realpath(os.path.join(root_real, rel_path))
+    if os.path.commonpath([root_real, target_real]) != root_real:
         raise HTTPException(status_code=403, detail="Access outside workspace is forbidden")
-    return target
+    return Path(target_real)
 
 
 @app.get("/api/files")
-async def list_files(path: str = "", token: str | None = Query(default=None), sb_token: str | None = Query(default=None)) -> JSONResponse:
-    verify_token(token, sb_token)
+async def list_files(request: Request, path: str = "") -> JSONResponse:
+    verify_request(request)
     target = resolve_safe_path(path)
     if not target.exists() or not target.is_dir():
         raise HTTPException(status_code=404, detail="Directory not found")
+    root_real = Path(os.path.realpath(config["workspace"]))
     items = []
     for entry in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))[:200]:
         items.append(
             {
                 "name": entry.name,
-                "path": str(entry.relative_to(Path(config["workspace"]).resolve())).replace("\\", "/"),
+                "path": str(Path(os.path.realpath(entry)).relative_to(root_real)).replace("\\", "/"),
                 "is_dir": entry.is_dir(),
                 "size": entry.stat().st_size if entry.is_file() else 0,
             }
@@ -490,8 +599,8 @@ async def list_files(path: str = "", token: str | None = Query(default=None), sb
 
 
 @app.get("/api/file")
-async def read_workspace_file(path: str, token: str | None = Query(default=None), sb_token: str | None = Query(default=None)) -> JSONResponse:
-    verify_token(token, sb_token)
+async def read_workspace_file(request: Request, path: str) -> JSONResponse:
+    verify_request(request)
     target = resolve_safe_path(path)
     if not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail="File not found")
@@ -502,24 +611,36 @@ async def read_workspace_file(path: str, token: str | None = Query(default=None)
 
 
 @app.get("/api/download")
-async def download_workspace_file(path: str, token: str | None = Query(default=None), sb_token: str | None = Query(default=None)) -> FileResponse:
-    verify_token(token, sb_token)
+async def download_workspace_file(request: Request, path: str) -> FileResponse:
+    verify_request(request)
     target = resolve_safe_path(path)
     if not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail="File not found")
+    audit_log("file_download", f"path={path}")
     return FileResponse(target, filename=target.name)
 
 
 @app.post("/api/upload")
-async def upload_file(file: UploadFile = File(...), token: str | None = Query(default=None), sb_token: str | None = Query(default=None)) -> JSONResponse:
-    verify_token(token, sb_token)
+async def upload_file(request: Request, file: UploadFile = File(...)) -> JSONResponse:
+    verify_request(request)
     sleep_manager.touch()
-    uploads_dir = Path(config["workspace"]).resolve() / "_remote_uploads"
+
+    raw_name = Path(file.filename or "upload.bin").name
+    ext = Path(raw_name).suffix.lower()
+    if ext not in ALLOWED_UPLOAD_EXTS:
+        raise HTTPException(status_code=400, detail=f"File type '{ext}' is not allowed")
+
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File exceeds 10 MB limit")
+
+    safe_stem = re.sub(r"[^a-zA-Z0-9._-]", "_", Path(raw_name).stem)[:64] or "file"
+    safe_name = f"{safe_stem}_{int(time.time())}{ext}"
+    uploads_dir = resolve_safe_path("_remote_uploads")
     uploads_dir.mkdir(parents=True, exist_ok=True)
-    safe_name = Path(file.filename or f"upload_{int(time.time())}").name
-    dest = uploads_dir / safe_name
-    data = await file.read()
+    dest = resolve_safe_path(f"_remote_uploads/{safe_name}")
     dest.write_bytes(data)
+    audit_log("file_upload", f"name={safe_name} bytes={len(data)}")
     return JSONResponse(
         {
             "filename": safe_name,
@@ -531,12 +652,20 @@ async def upload_file(file: UploadFile = File(...), token: str | None = Query(de
 
 
 @app.websocket("/ws/chat")
-async def ws_chat(websocket: WebSocket, token: str | None = Query(default=None), sb_token: str | None = Query(default=None)) -> None:
-    if not is_authorized(token, sb_token):
+async def ws_chat(websocket: WebSocket) -> None:
+    await websocket.accept()
+    ip = websocket.client.host if websocket.client else "unknown"
+    try:
+        auth_raw = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+        auth_msg = json.loads(auth_raw)
+        if auth_msg.get("type") != "auth" or not check_credentials(auth_msg.get("token"), auth_msg.get("sb_token")):
+            audit_log("ws_auth_failure", f"ip={ip}")
+            await websocket.close(code=4001)
+            return
+    except Exception:
         await websocket.close(code=4001)
         return
 
-    await websocket.accept()
     hub.clients.add(websocket)
     sleep_manager.touch()
 
@@ -568,6 +697,7 @@ async def ws_chat(websocket: WebSocket, token: str | None = Query(default=None),
                     hub.current_proc.terminate()
                 hub.queue.clear()
                 await hub.broadcast({"type": "queue", "count": 0})
+                audit_log("agy_stop", "user_requested")
                 continue
 
             if data.get("type") == "chat":
@@ -610,17 +740,22 @@ async def handle_agy_turn(prompt: str, msg_id: str) -> None:
         await hub.broadcast({"type": "status", "busy": False})
         return
 
+    mode = config.get("agy_mode", "plan")
+    if mode not in ("accept-edits", "plan"):
+        mode = "plan"
+
     args = [
         "-p",
         prompt,
         "--output-format",
         "stream-json",
         "--mode",
-        config.get("agy_mode", "accept-edits"),
+        mode,
     ]
-    if hub.conversation_id:
+    if hub.conversation_id and is_valid_cid(hub.conversation_id):
         args.extend(["--resume", hub.conversation_id])
 
+    audit_log("agy_turn_start", f"mode={mode} prompt_len={len(prompt)}")
     try:
         proc = await asyncio.create_subprocess_exec(
             agy_exe,
@@ -650,7 +785,7 @@ async def handle_agy_turn(prompt: str, msg_id: str) -> None:
 
             if ev_type == "init":
                 cid = evt.get("conversation_id")
-                if cid:
+                if cid and is_valid_cid(cid):
                     hub.conversation_id = cid
                     hub.persist_current_chat()
 
@@ -699,6 +834,7 @@ async def handle_agy_turn(prompt: str, msg_id: str) -> None:
             hub.history.append(final_msg)
             hub.persist_current_chat()
             await hub.broadcast({"type": "done", "message": final_msg, "conversation_id": hub.conversation_id})
+        audit_log("agy_turn_done", f"tools={len(tools)} out_len={len(assistant_text)}")
 
     except Exception as exc:
         await hub.broadcast({"type": "error", "message": f"Error: {exc}"})

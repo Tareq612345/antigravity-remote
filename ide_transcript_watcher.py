@@ -8,6 +8,11 @@ from typing import Any, Awaitable, Callable
 
 BRAIN_DIR = Path.home() / ".gemini" / "antigravity" / "brain"
 USER_REQ_RE = re.compile(r"<USER_REQUEST>\s*(.*?)\s*</USER_REQUEST>", re.DOTALL)
+SAFE_CID_RE = re.compile(r"^[a-zA-Z0-9-]{1,64}$")
+
+
+def is_valid_cid(conversation_id: str | None) -> bool:
+    return bool(conversation_id and SAFE_CID_RE.fullmatch(conversation_id))
 
 
 def _extract_user_text(raw: str) -> str:
@@ -42,7 +47,12 @@ def _parse_entry(obj: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def get_transcript_path(conversation_id: str) -> Path:
-    return BRAIN_DIR / conversation_id / ".system_generated" / "logs" / "transcript.jsonl"
+    if not is_valid_cid(conversation_id):
+        raise ValueError("Invalid conversation ID")
+    target = (BRAIN_DIR / conversation_id / ".system_generated" / "logs" / "transcript.jsonl").resolve()
+    if BRAIN_DIR.resolve() not in target.parents:
+        raise ValueError("Conversation path outside brain directory")
+    return target
 
 
 def list_ide_chats(limit: int = 30) -> list[dict[str, Any]]:

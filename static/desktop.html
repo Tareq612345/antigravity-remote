@@ -77,8 +77,8 @@
     <input id="workspaceInput" type="text" style="direction:ltr;" />
     <div class="row">
       <select id="modeSelect" style="flex:1;direction:ltr;">
-        <option value="accept-edits">accept-edits</option>
-        <option value="plan">plan</option>
+        <option value="plan">plan (Safe: read &amp; plan only)</option>
+        <option value="accept-edits">accept-edits (⚠️ Auto-edits files — use with care)</option>
       </select>
       <button class="btn" onclick="saveWorkspace()" data-i18n="save">Save</button>
     </div>
@@ -143,8 +143,8 @@
     }
 
     async function api(path, opts = {}) {
-      const sep = path.includes("?") ? "&" : "?";
-      const res = await fetch(`${path}${sep}token=${encodeURIComponent(TOKEN)}`, opts);
+      const headers = Object.assign({}, opts.headers || {}, { "Authorization": `Bearer ${TOKEN}` });
+      const res = await fetch(`${path}`, Object.assign({}, opts, { headers }));
       return res.json();
     }
 
