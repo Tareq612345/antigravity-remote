@@ -1,3 +1,5 @@
+import os
+import subprocess
 import sys
 import threading
 import time
@@ -36,7 +38,30 @@ def run_uvicorn() -> None:
     uvicorn.run(server.app, host=host, port=port, log_level="warning", access_log=False)
 
 
+def cleanup_stale_instances() -> None:
+    """Ensure only one AntigravityRemote instance holds port 8765."""
+    my_pid = os.getpid()
+    if os.name == "nt":
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        subprocess.run(
+            ["taskkill", "/F", "/FI", f"PID ne {my_pid}", "/IM", "AntigravityRemote.exe"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=flags,
+            check=False,
+        )
+        subprocess.run(
+            ["taskkill", "/F", "/IM", "cloudflared.exe"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=flags,
+            check=False,
+        )
+        time.sleep(0.4)
+
+
 def main() -> None:
+    cleanup_stale_instances()
     srv_thread = threading.Thread(target=run_uvicorn, daemon=True)
     srv_thread.start()
     time.sleep(0.8)

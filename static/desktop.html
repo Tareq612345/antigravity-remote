@@ -166,6 +166,7 @@
     }
 
     async function refresh() {
+      if (!TOKEN) return;
       try {
         const st = await api("/api/status");
         keepDisplayOn = st.sleep.keep_display_on;

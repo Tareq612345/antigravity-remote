@@ -127,12 +127,15 @@ class TunnelManager:
             m = TRYCLOUDFLARE_RE.search(line)
             if m and not self.public_url:
                 self.public_url = m.group(0)
-                print(f"[Tunnel] Public URL ready: {self.public_url}")
+                print(f"[Tunnel] Public URL detected: {self.public_url}")
+            if self.public_url and "Registered tunnel connection" in line:
+                print(f"[Tunnel] Edge connection registered: {self.public_url}")
                 if on_url_ready:
                     try:
                         on_url_ready(self.public_url)
                     except Exception as exc:
                         print(f"[Tunnel] Callback error: {exc}")
+                    on_url_ready = None
 
 
 class SupabaseAuthClient:
