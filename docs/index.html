@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="theme-color" content="#0d0d0d" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <link rel="icon" type="image/png" href="app.png" />
+  <link rel="icon" type="image/svg+xml" href="icon.svg" />
+  <link rel="apple-touch-icon" href="app.png" />
   <title>Antigravity Remote</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
@@ -50,6 +51,8 @@
     .side-brand { font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 8px; }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--err); }
     .dot.online { background: var(--ok); }
+    .brand-icon { width: 22px; height: 22px; border-radius: 6px; object-fit: cover; opacity: .45; filter: grayscale(1); transition: opacity .2s ease, filter .2s ease; flex: 0 0 auto; }
+    .brand-icon.online { opacity: 1; filter: none; }
     .icon-btn {
       background: transparent; border: none; color: var(--muted); width: 34px; height: 34px;
       border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; font-size: 16px;
@@ -179,7 +182,7 @@
   <aside id="sidebar">
     <div class="side-top">
       <div class="side-brand">
-        <span id="connDot" class="dot"></span>
+        <img id="connDot" class="brand-icon" src="icon.svg" alt="" />
         <span>Antigravity</span>
       </div>
       <button class="icon-btn" onclick="toggleSidebar(true)">✕</button>
@@ -456,7 +459,6 @@
         connectWS();
         refreshStatus();
         loadChats();
-        loadModels();
       } catch {
         setAuthBusy(false, lang === "ar" ? `تعذر الوصول إلى (${device.device_name}). تأكد أن السيرفر شغال على الكمبيوتر.` : `Could not reach ${device.device_name}. Ensure the app is running on your PC.`);
         retryBtn.style.display = "inline-block";
@@ -652,18 +654,7 @@
       } catch {}
     }
 
-    const FALLBACK_MODELS = [
-      { id: "gemini-4-hydrogen-medium", name: "Gemini 4 Hydrogen (Medium)" },
-      { id: "gemini-4-hydrogen-high", name: "Gemini 4 Hydrogen (High)" },
-      { id: "gemini-4-hydrogen-xhigh", name: "Gemini 4 Hydrogen (XHigh)" },
-      { id: "gemini-4-hydrogen-low", name: "Gemini 4 Hydrogen (Low)" },
-      { id: "gemini-3.8-flash-medium", name: "Gemini 3.8 Flash (Medium)" },
-      { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)" },
-      { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking)" },
-      { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)" },
-      { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)" }
-    ];
-    let cachedModels = [...FALLBACK_MODELS];
+    let cachedModels = [];
     let currentModelId = "";
     let currentEffort = "";
 
@@ -671,17 +662,14 @@
       const pop = document.getElementById("modelPopover");
       const opening = !pop.classList.contains("open");
       pop.classList.toggle("open", opening);
-      if (opening) {
-        renderModelsPopover(null);
-        loadModels();
-      }
+      if (opening) loadModels();
     }
 
     async function loadModels() {
       if (!SERVER_URL) return;
       try {
         const data = await api("/api/models");
-        if (data.models && data.models.length) cachedModels = data.models;
+        cachedModels = data.models || [];
         currentModelId = data.current_model || "";
         currentEffort = data.current_effort || "";
         renderModelsPopover(data.usage || null);
@@ -722,31 +710,23 @@
 
     async function selectModel(mid) {
       currentModelId = mid;
+      await api("/api/model", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: currentModelId, effort: currentEffort })
+      });
       renderModelsPopover(null);
-      try {
-        await api("/api/model", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ model: currentModelId, effort: currentEffort })
-        });
-        document.getElementById("modelPopover").classList.remove("open");
-      } catch {
-        alert("Make sure you closed the old app and started dist_v3\\AntigravityRemote.exe");
-      }
+      document.getElementById("modelPopover").classList.remove("open");
     }
 
     async function selectEffort(eff) {
       currentEffort = eff;
+      await api("/api/model", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: currentModelId, effort: currentEffort })
+      });
       renderModelsPopover(null);
-      try {
-        await api("/api/model", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ model: currentModelId, effort: currentEffort })
-        });
-      } catch {
-        alert("Make sure you closed the old app and started dist_v3\\AntigravityRemote.exe");
-      }
     }
 
     async function saveWorkspace() {
