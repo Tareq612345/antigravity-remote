@@ -11,9 +11,10 @@
   </p>
 
   <p>
-    <a href="docs/GUIDE.en.md"><b>English Guide</b></a>
-    &nbsp;|&nbsp;
-    <a href="docs/GUIDE.ar.md"><b>دليل عربي</b></a>
+    <a href="GUIDE_EN.md">Quick Guide (English)</a> ·
+    <a href="GUIDE_AR.md">الدليل السريع (العربية)</a> ·
+    <a href="https://antigravity-remote-8fi.pages.dev/">Web Client</a> ·
+    <a href="https://github.com/Tareq612345/antigravity-remote/releases">Releases</a>
   </p>
 </div>
 
@@ -25,6 +26,17 @@
 
 > [!NOTE]
 > This is an **unofficial**, community-built project and is not affiliated with or endorsed by Google.
+
+---
+
+## Quick Start (Simple & Fast)
+
+1. **Prerequisite:** Make sure **`agy` CLI** is installed and signed in on your Windows PC (`~/.gemini/bin/agy.exe`).
+2. **Download & Run:** Download **`AntigravityRemote.exe`** from [Releases](https://github.com/Tareq612345/antigravity-remote/releases) and double-click it.
+3. **Link Google Account:** Click **Sign in with Google** in the desktop window, then click **Confirm & Link This PC**.
+4. **Open on Mobile:** Visit **[https://antigravity-remote-8fi.pages.dev/](https://antigravity-remote-8fi.pages.dev/)** from your phone and sign in with the **same Google account**.
+
+For full step-by-step instructions, see [`GUIDE_EN.md`](GUIDE_EN.md) or [`GUIDE_AR.md`](GUIDE_AR.md).
 
 ---
 
@@ -41,29 +53,8 @@
 
 ---
 
-## Architecture
+## Run from Source
 
-```text
-[ Mobile / Web UI (GitHub Pages) ]
-        │  Google OAuth (Supabase) + Authorization Bearer JWT
-        ▼
-[ Cloudflare Quick Tunnel (HTTPS / WSS) ]
-        │
-        ▼
-[ Local Desktop Server (127.0.0.1:8765) ] ──▶ [ agy.exe / IDE Transcripts ]
-```
-
----
-
-## Quick Start
-
-### Option 1: Standalone Windows Executable
-1. Make sure **`agy` CLI** is installed and signed in on your PC (`~/.gemini/bin/agy.exe`).
-2. Run **`AntigravityRemote.exe`** (it automatically downloads and SHA256-verifies `cloudflared.exe` if needed).
-3. Click **Sign in with Google** to link your PC, then click **Confirm & Link This PC**.
-4. Open the web client on your phone (`https://antigravity-remote-8fi.pages.dev/`) and sign in with the **same Google account**.
-
-### Option 2: Run from Source
 ```bash
 git clone https://github.com/Tareq612345/antigravity-remote.git
 cd antigravity-remote
@@ -82,15 +73,6 @@ uvicorn server:app --host 127.0.0.1 --port 8765 --no-access-log
 
 ---
 
-## Self-Hosting Setup (Supabase + GitHub Pages)
-
-1. Create a Supabase project and run [`supabase_schema.sql`](supabase_schema.sql) in the SQL Editor to create `public.remote_devices` with Row Level Security enabled.
-2. Enable **Google OAuth** under `Authentication -> Providers -> Google` and disable public email signups if desired.
-3. Update `SUPABASE_URL` and `SUPABASE_ANON_KEY` in [`tunnel_and_auth.py`](tunnel_and_auth.py) and [`docs/index.html`](docs/index.html).
-4. Enable **GitHub Pages** on your fork serving from `/docs`.
-
----
-
 ## Building the Executable
 
 ```bash
@@ -98,17 +80,16 @@ pip install pyinstaller
 pyinstaller --noconfirm --onefile --noconsole --name AntigravityRemote --icon "static\app.ico" --add-data "static;static" --exclude-module google.antigravity --exclude-module google.genai --exclude-module mcp --exclude-module tkinter --exclude-module unittest --exclude-module pydoc desktop_app.py
 ```
 
-### Latest Build Checksum
+### Latest Release Checksum (`0.1`)
 - `AntigravityRemote.exe` (`SHA256`):
   ```text
-  22ADE978E5DCB19943FEA5487D99218D77B69E4C673F8F354A677641EBE3631F
+  96862FD0F74B90002D84CE259E1D4FECFF2945075933981F6A07942F57E2909B
   ```
 
 ---
 
 ## Testing & Security
 
-Run the unit test suite and dependency audit locally:
 ```bash
 python -m unittest discover -s tests -v
 pip-audit -r requirements.txt
