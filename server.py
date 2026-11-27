@@ -996,6 +996,15 @@ async def ws_chat(websocket: WebSocket) -> None:
                 if not prompt:
                     continue
 
+                if hub.ide_mirror_id:
+                    if hub._ide_watch_task:
+                        hub._ide_watch_task.cancel()
+                        hub._ide_watch_task = None
+                    hub.ide_mirror_id = None
+                    hub.conversation_id = None
+                    hub.history = []
+                    await hub.broadcast({"type": "history", "messages": [], "conversation_id": None, "title": "New Chat"})
+
                 open_files = data.get("open_files") or []
                 safe_open: list[str] = []
                 if isinstance(open_files, list):
