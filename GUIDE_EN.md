@@ -6,12 +6,15 @@ Control your PC's **Google Antigravity** session directly from your phone in **3
 
 ## Before You Start
 - Windows 10 or Windows 11 PC.
-- **`agy` CLI** installed and signed in on your PC (verify by running `agy` in a terminal once).
+- **`agy` CLI** installed and signed in on your PC (verify by running `agy` in a terminal once). The app starts `agy` itself for every message, so the CLI has to work on its own. The Antigravity IDE does not need to be open, and no chat session has to be running in it.
 
 ---
 
 ## Step 1: Download & Launch on Your PC
-1. Download **`AntigravityRemote.exe`** from the [GitHub Releases](https://github.com/Tareq612345/antigravity-remote/releases) page.
+1. Download **`AntigravityRemote.exe`** — release [`0.1`](https://github.com/Tareq612345/antigravity-remote/releases/tag/0.1) (pre-release), 34,532,706 bytes (32.9 MB).
+   - Direct link: <https://github.com/Tareq612345/antigravity-remote/releases/download/0.1/AntigravityRemote.exe>
+   - Optional check before running it: in PowerShell, `Get-FileHash .\AntigravityRemote.exe -Algorithm SHA256` must print
+     `96862FD0F74B90002D84CE259E1D4FECFF2945075933981F6A07942F57E2909B`.
 2. Double-click **`AntigravityRemote.exe`**.
    - On first launch, it automatically downloads and verifies `cloudflared` (takes a few seconds) and opens an encrypted tunnel.
    - Wait until the **Connection & Cloudflare Tunnel** card says **`Online`**.
