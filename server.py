@@ -2,6 +2,7 @@ import asyncio
 import json
 import secrets
 import socket
+import sys
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -18,10 +19,13 @@ from ide_transcript_watcher import list_ide_chats, parse_transcript, watch_ide_t
 from sleep_manager import SleepManager
 from tunnel_and_auth import SUPABASE_ANON_KEY, SUPABASE_URL, SupabaseAuthClient, TunnelManager
 
-BASE_DIR = Path(__file__).resolve().parent
-STATIC_DIR = BASE_DIR / "static"
-CONFIG_PATH = BASE_DIR / "config.json"
-CHATS_PATH = BASE_DIR / "chats.json"
+BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+STATIC_DIR = BUNDLE_DIR / "static"
+DATA_DIR = Path.home() / ".antigravity-remote"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+LEGACY_DIR = Path(__file__).resolve().parent
+CONFIG_PATH = (LEGACY_DIR / "config.json") if (LEGACY_DIR / "config.json").exists() else (DATA_DIR / "config.json")
+CHATS_PATH = (LEGACY_DIR / "chats.json") if (LEGACY_DIR / "chats.json").exists() else (DATA_DIR / "chats.json")
 AGY_CONVERSATIONS_DIR = Path.home() / ".gemini" / "antigravity-cli" / "conversations"
 DEFAULT_AGY_PATH = str(Path.home() / ".gemini" / "bin" / "agy.exe")
 
@@ -68,7 +72,7 @@ sleep_manager = SleepManager(
     keep_display_on=bool(config.get("keep_display_on", False)),
 )
 sb_auth = SupabaseAuthClient()
-tunnel_manager = TunnelManager(local_port=int(config.get("port", 8765)))
+tunnel_manager = TunnelManager(local_port=int(config.get("port", 8765)), data_dir=DATA_DIR)
 
 
 class HubState:
@@ -216,31 +220,68 @@ async def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/desktop")
+async def desktop_ui() -> FileResponse:
+    return FileResponse(STATIC_DIR / "desktop.html")
+
+
 @app.get("/pc-login")
 async def pc_login_page() -> HTMLResponse:
-    html = f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>ربط جهاز الكمبيوتر</title>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script></head>
-    <body style="background:#0d0d0d;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;">
-    <div style="background:#171717;padding:24px;border-radius:14px;max-width:400px;text-align:center;">
-      <h2>ربط هذا الكمبيوتر بحسابك</h2>
-      <p id="msg" style="color:#9b9b9b;font-size:14px;">سجل الدخول بنفس حساب جوجل الذي تستخدمه على الموبايل والموقع.</p>
-      <button onclick="loginGoogle()" style="padding:10px 18px;border-radius:10px;border:0;background:#fff;color:#000;font-weight:700;cursor:pointer;margin:8px;">تسجيل الدخول بـ Google</button>
+    html = f"""<!DOCTYPE html><html lang="en" dir="ltr"><head><meta charset="utf-8"><title>Link PC — Antigravity Remote</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+      body{{background:#0d0d0d;color:#ececec;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}}
+      .card{{background:#171717;border:1px solid rgba(255,255,255,.1);padding:28px;border-radius:16px;width:90%;max-width:400px;text-align:center;display:flex;flex-direction:column;gap:14px;align-items:center;}}
+      .spinner{{width:28px;height:28px;border:3px solid rgba(255,255,255,.15);border-top-color:#10a37f;border-radius:50%;animation:spin .8s linear infinite;display:none;}}
+      @keyframes spin{{to{{transform:rotate(360deg)}}}}
+      .btn{{padding:10px 20px;border-radius:10px;border:0;background:#fff;color:#000;font-weight:600;cursor:pointer;font-size:14px;}}
+      .link-btn{{background:transparent;border:1px solid rgba(255,255,255,.15);color:#9b9b9b;padding:7px 14px;border-radius:8px;cursor:pointer;font-size:12.5px;display:none;}}
+      .link-btn:hover{{color:#fff;border-color:rgba(255,255,255,.35);}}
+    </style></head>
+    <body>
+    <div class="card">
+      <h2 id="title" style="margin:0;font-size:20px;">Link This PC to Your Account</h2>
+      <div id="spinner" class="spinner"></div>
+      <p id="msg" style="color:#9b9b9b;font-size:13.5px;margin:0;line-height:1.5;">Sign in with the same Google account you use on your mobile browser.</p>
+      <button id="loginBtn" class="btn" onclick="loginGoogle()">Sign in with Google</button>
+      <div style="width:100%;border-top:1px solid rgba(255,255,255,.08);padding-top:12px;display:none;" id="footerActions">
+        <button id="switchBtn" class="link-btn" style="display:inline-block;" onclick="switchAccount()">Switch Account / Sign Out</button>
+      </div>
     </div>
     <script>
       const sb = supabase.createClient("{SUPABASE_URL}", "{SUPABASE_ANON_KEY}");
+      const setBusy = (on, text) => {{
+        document.getElementById('spinner').style.display = on ? 'block' : 'none';
+        if (text) document.getElementById('msg').textContent = text;
+      }};
       async function loginGoogle() {{
+        document.getElementById('loginBtn').style.display = 'none';
+        setBusy(true, 'Redirecting to Google Sign-In...');
         await sb.auth.signInWithOAuth({{ provider: 'google', options: {{ redirectTo: window.location.origin + '/pc-login' }} }});
+      }}
+      async function switchAccount() {{
+        setBusy(true, 'Signing out...');
+        await sb.auth.signOut();
+        location.href = '/pc-login';
       }}
       (async () => {{
         const {{ data: {{ session }} }} = await sb.auth.getSession();
         if (session) {{
-          document.getElementById('msg').textContent = 'جاري ربط الجهاز بالحساب: ' + session.user.email + '...';
+          document.getElementById('loginBtn').style.display = 'none';
+          setBusy(true, 'Verifying account ' + session.user.email + '...');
           const r = await fetch('/api/pc-link?token={config["token"]}', {{
             method: 'POST',
             headers: {{ 'Content-Type': 'application/json' }},
             body: JSON.stringify({{ access_token: session.access_token, refresh_token: session.refresh_token }})
           }});
-          if (r.ok) document.getElementById('msg').textContent = '✅ تم ربط الكمبيوتر بنجاح بالحساب: ' + session.user.email;
+          if (r.ok) {{
+            setBusy(false, '✅ PC linked successfully to ' + session.user.email + '. You can close this tab.');
+            document.getElementById('title').textContent = 'PC Connected';
+            document.getElementById('footerActions').style.display = 'block';
+          }} else {{
+            setBusy(false, 'Failed to link PC. Please try signing in again.');
+            document.getElementById('loginBtn').style.display = 'inline-block';
+          }}
         }}
       }})();
     </script></body></html>"""
@@ -587,6 +628,7 @@ async def handle_agy_turn(prompt: str, msg_id: str) -> None:
             cwd=workspace,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            creationflags=getattr(asyncio.subprocess, "CREATE_NO_WINDOW", 0x08000000),
         )
         hub.current_proc = proc
 
