@@ -498,7 +498,32 @@
           const res = await fetch(`${device.tunnel_url}/api/status`, {
             headers: { "Authorization": `Bearer ${SB_TOKEN}` }
           });
-          if (!res.ok) throw new Error("Unauthorized or offline");
+          if (res.status === 401) {
+            const { data: refData, error: refErr } = await sb.auth.refreshSession();
+            if (!refErr && refData && refData.session) {
+              SB_TOKEN = refData.session.access_token;
+              const res2 = await fetch(`${device.tunnel_url}/api/status`, {
+                headers: { "Authorization": `Bearer ${SB_TOKEN}` }
+              });
+              if (res2.ok) {
+                SERVER_URL = device.tunnel_url;
+                setAuthBusy(false);
+                authScreen.classList.add("hidden");
+                connectWS();
+                refreshStatus();
+                loadChats();
+                loadModels();
+                loadSlashItems();
+                return;
+              }
+            }
+            await sb.auth.signOut({ scope: "local" });
+            setAuthBusy(false, lang === "ar" ? "انتهت صلاحية الجلسة أو الحساب غير مطابق. سجل الدخول بـ Google مرة أخرى." : "Session expired or account mismatch. Please sign in with Google again.");
+            googleBtn.style.display = "inline-block";
+            authFooter.style.display = "none";
+            return;
+          }
+          if (!res.ok) throw new Error("Offline");
           SERVER_URL = device.tunnel_url;
           setAuthBusy(false);
           authScreen.classList.add("hidden");

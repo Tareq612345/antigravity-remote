@@ -442,7 +442,7 @@ async def pc_login_page(request: Request) -> HTMLResponse:
       }}
       async function switchAccount() {{
         setBusy(true, 'Signing out...');
-        await sb.auth.signOut();
+        await sb.auth.signOut({{ scope: 'local' }});
         location.href = '/pc-login';
       }}
       (async () => {{
