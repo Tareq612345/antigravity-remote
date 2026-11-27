@@ -6,12 +6,15 @@
 
 ## قبل أن تبدأ
 - جهاز كمبيوتر بنظام Windows 10 أو Windows 11.
-- أداة **`agy` CLI** مثبتة ومفعلة بحسابك على الكمبيوتر (تأكد بتشغيل `agy` مرة واحدة في التيرمينال).
+- أداة **`agy` CLI** مثبتة ومفعلة بحسابك على الكمبيوتر (تأكد بتشغيل `agy` مرة واحدة في التيرمينال). التطبيق هو الذي يشغّل `agy` بنفسه مع كل رسالة، فلازم تكون الأداة شغالة لوحدها. مش مطلوب إن برنامج Antigravity IDE يكون مفتوح، ولا محادثة شغالة جواه.
 
 ---
 
 ## الخطوة 1: تحميل وتشغيل التطبيق على الكمبيوتر
-1. حمّل ملف **`AntigravityRemote.exe`** من صفحة [Releases](https://github.com/Tareq612345/antigravity-remote/releases).
+1. حمّل ملف **`AntigravityRemote.exe`** — الإصدار [`0.1`](https://github.com/Tareq612345/antigravity-remote/releases/tag/0.1) (نسخة تجريبية)، حجمه 34,532,706 بايت (حوالي 32.9 ميجابايت).
+   - الرابط المباشر: <https://github.com/Tareq612345/antigravity-remote/releases/download/0.1/AntigravityRemote.exe>
+   - لو حبيت تتأكد من الملف قبل تشغيله: نفّذ في PowerShell الأمر `Get-FileHash .\AntigravityRemote.exe -Algorithm SHA256`
+     ولازم يطلع الناتج `96862FD0F74B90002D84CE259E1D4FECFF2945075933981F6A07942F57E2909B`.
 2. افتح **`AntigravityRemote.exe`**.
    - في أول تشغيل، سيقوم تلقائياً بتنزيل والتحقق من `cloudflared` خلال ثوانٍ وفتح نفق مشفر.
    - انتظر حتى تظهر كلمة **`Online`** في بطاقة **Connection & Cloudflare Tunnel**.
