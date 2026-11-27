@@ -23,6 +23,9 @@ from ide_transcript_watcher import is_valid_cid, list_ide_chats, parse_transcrip
 from sleep_manager import SleepManager
 from tunnel_and_auth import SUPABASE_ANON_KEY, SUPABASE_URL, SupabaseAuthClient, TunnelManager
 
+APP_VERSION = "0.1"
+GITHUB_RELEASES_API = "https://api.github.com/repos/Tareq612345/antigravity-remote/releases?per_page=1"
+
 BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 STATIC_DIR = BUNDLE_DIR / "static"
 DATA_DIR = Path.home() / ".antigravity-remote"
@@ -181,6 +184,7 @@ class HubState:
         self.pairing_codes: dict[str, tuple[str, float]] = {}
         self.active_ws_connections: int = 0
         self.models_cache: tuple[float, list[dict[str, str]]] | None = None
+        self.update_cache: tuple[float, dict[str, Any]] | None = None
         self.usage_stats: dict[str, Any] = {
             "turns": 0,
             "input_tokens": 0,
@@ -512,7 +516,75 @@ async def get_status(request: Request) -> JSONResponse:
         payload["workspace"] = config["workspace"]
         payload["owner_email"] = config.get("owner_email")
         payload["tunnel_url"] = tunnel_manager.public_url
+        payload["agy_installed"] = Path(config.get("agy_path", DEFAULT_AGY_PATH)).exists()
+        payload["app_version"] = APP_VERSION
     return JSONResponse(payload)
+
+
+def _ver_tuple(v: str) -> tuple[int, ...]:
+    parts = [int(x) for x in re.findall(r"\d+", v)]
+    return tuple(parts) if parts else (0,)
+
+
+@app.get("/api/check-update")
+async def check_update(request: Request) -> JSONResponse:
+    verify_request(request)
+    if not is_local_client(request):
+        raise HTTPException(status_code=403, detail="Localhost only")
+    now = time.monotonic()
+    if hub.update_cache and now < hub.update_cache[0]:
+        return JSONResponse(hub.update_cache[1])
+
+    result: dict[str, Any] = {
+        "update_available": False,
+        "current": APP_VERSION,
+        "latest": APP_VERSION,
+        "url": "https://github.com/Tareq612345/antigravity-remote/releases",
+    }
+    try:
+        import requests as _req
+        r = _req.get(GITHUB_RELEASES_API, timeout=6, headers={"Accept": "application/vnd.github+json"})
+        if r.status_code == 200 and r.json():
+            rel = r.json()[0]
+            tag = (rel.get("tag_name") or "").strip()
+            if tag and _ver_tuple(tag) > _ver_tuple(APP_VERSION):
+                result = {
+                    "update_available": True,
+                    "current": APP_VERSION,
+                    "latest": tag,
+                    "url": rel.get("html_url") or result["url"],
+                }
+        hub.update_cache = (now + 3600, result)
+    except Exception:
+        pass
+    return JSONResponse(result)
+
+
+@app.post("/api/install-agy")
+async def install_agy(request: Request) -> JSONResponse:
+    verify_request(request)
+    if not is_local_client(request):
+        raise HTTPException(status_code=403, detail="Localhost only")
+    agy_path = Path(config.get("agy_path", DEFAULT_AGY_PATH))
+    if not agy_path.exists():
+        proc = await asyncio.create_subprocess_exec(
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "irm https://antigravity.google/cli/install.ps1 | iex",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            creationflags=getattr(asyncio.subprocess, "CREATE_NO_WINDOW", 0x08000000),
+        )
+        _, err = await asyncio.wait_for(proc.communicate(), timeout=120.0)
+        if proc.returncode != 0 or not agy_path.exists():
+            raise HTTPException(status_code=500, detail=err.decode("utf-8", errors="replace")[:300] or "Install failed")
+        audit_log("agy_installed", "via_desktop_app")
+    # Launch interactive agy window for first-time sign-in if requested
+    subprocess.Popen(["cmd.exe", "/c", "start", "", str(agy_path)], shell=False)
+    return JSONResponse({"installed": True, "path": str(agy_path)})
 
 
 @app.get("/api/models")

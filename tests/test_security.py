@@ -106,6 +106,11 @@ class SecurityTestSuite(unittest.TestCase):
         # Reset back to default
         self.client.post("/api/model", json={"model": "", "effort": ""}, headers=self.hdr)
 
+    def test_local_only_endpoints_blocked_remotely(self) -> None:
+        remote_hdr = {**self.hdr, "cf-connecting-ip": "203.0.113.8", "cf-ray": "ray1"}
+        self.assertEqual(self.client.get("/api/check-update", headers=remote_hdr).status_code, 403)
+        self.assertEqual(self.client.post("/api/install-agy", headers=remote_hdr).status_code, 403)
+
 
 if __name__ == "__main__":
     unittest.main()

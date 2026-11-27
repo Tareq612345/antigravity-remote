@@ -52,6 +52,24 @@
     </div>
   </div>
 
+  <div id="updateBanner" class="card" style="display:none;border-color:#10a37f;background:rgba(16,163,127,0.12);">
+    <div class="row">
+      <strong id="updateText">New version available!</strong>
+      <button class="btn ok" onclick="openUpdateUrl()" data-i18n="downloadUpdate">Download Update</button>
+    </div>
+  </div>
+
+  <div id="agyCard" class="card" style="display:none;border-color:#f59e0b;">
+    <div class="row">
+      <strong data-i18n="agyMissing">agy CLI Not Installed</strong>
+      <span class="pill">Required</span>
+    </div>
+    <div id="agyDesc" class="label" data-i18n="agyMissingDesc">Install agy CLI once so Antigravity Remote can run chats with your account.</div>
+    <div class="row">
+      <button id="installAgyBtn" class="btn ok" onclick="installAgy()" data-i18n="installAgy">Install &amp; Sign In agy CLI</button>
+    </div>
+  </div>
+
   <div class="card">
     <div class="row">
       <strong data-i18n="googleAccount">Google Account</strong>
@@ -111,7 +129,11 @@
         save: "Save",
         sleepTitle: "Sleep & Power",
         extend7: "Extend 7 Hours",
-        toggleScreen: "Toggle Keep Screen On"
+        toggleScreen: "Toggle Keep Screen On",
+        downloadUpdate: "Download Update",
+        agyMissing: "agy CLI Not Installed",
+        agyMissingDesc: "Install agy CLI once so Antigravity Remote can run chats with your account.",
+        installAgy: "Install & Sign In agy CLI"
       },
       ar: {
         googleAccount: "حساب Google المرتبط",
@@ -124,12 +146,17 @@
         save: "حفظ",
         sleepTitle: "إدارة السكون",
         extend7: "تجديد 7 ساعات",
-        toggleScreen: "تبديل إبقاء الشاشة"
+        toggleScreen: "تبديل إبقاء الشاشة",
+        downloadUpdate: "تحميل التحديث",
+        agyMissing: "أداة agy CLI غير مثبتة",
+        agyMissingDesc: "ثبّت أداة agy CLI مرة واحدة ليعمل الشات بحسابك.",
+        installAgy: "تثبيت وتسجيل دخول agy CLI"
       }
     };
     let lang = localStorage.getItem("ag_lang") || "en";
     let TOKEN = sessionStorage.getItem("ag_token") || "";
     let keepDisplayOn = false;
+    let updateUrl = "https://github.com/Tareq612345/antigravity-remote/releases";
 
     async function initToken() {
       if (!TOKEN && window.pywebview && window.pywebview.api && window.pywebview.api.get_token) {
@@ -137,6 +164,7 @@
         sessionStorage.setItem("ag_token", TOKEN);
       }
       refresh();
+      checkUpdate();
     }
     window.addEventListener("pywebviewready", initToken);
 
@@ -190,7 +218,43 @@
           document.getElementById("workspaceInput").value = st.workspace;
         }
         document.getElementById("modeSelect").value = st.agy_mode || "accept-edits";
+        if (st.agy_installed === false) {
+          document.getElementById("agyCard").style.display = "flex";
+        } else {
+          document.getElementById("agyCard").style.display = "none";
+        }
       } catch {}
+    }
+
+    async function checkUpdate() {
+      if (!TOKEN) return;
+      try {
+        const u = await api("/api/check-update");
+        if (u.update_available) {
+          updateUrl = u.url;
+          document.getElementById("updateText").textContent =
+            (lang === "ar" ? "يتوفر تحديث جديد: " : "New update available: ") + u.latest;
+          document.getElementById("updateBanner").style.display = "flex";
+        }
+      } catch {}
+    }
+
+    function openUpdateUrl() {
+      openExternal(updateUrl);
+    }
+
+    async function installAgy() {
+      const btn = document.getElementById("installAgyBtn");
+      btn.disabled = true;
+      btn.textContent = lang === "ar" ? "جاري التثبيت..." : "Installing...";
+      try {
+        await api("/api/install-agy", { method: "POST" });
+        refresh();
+      } catch {
+        btn.disabled = false;
+        btn.textContent = I18N[lang].installAgy;
+        alert(lang === "ar" ? "تعذر التثبيت تلقائياً" : "Auto-install failed");
+      }
     }
 
     async function saveWorkspace() {
