@@ -17,6 +17,9 @@ class DesktopBridge:
 
 
 def create_tray_icon_image() -> Image.Image:
+    icon_path = server.STATIC_DIR / "app.png"
+    if icon_path.exists():
+        return Image.open(icon_path).convert("RGBA").resize((64, 64), Image.Resampling.LANCZOS)
     img = Image.new("RGBA", (64, 64), (13, 13, 13, 255))
     draw = ImageDraw.Draw(img)
     draw.ellipse((8, 8, 56, 56), fill=(16, 163, 127, 255))
