@@ -184,6 +184,7 @@ class HubState:
         self.pairing_codes: dict[str, tuple[str, float]] = {}
         self.active_ws_connections: int = 0
         self.models_cache: tuple[float, list[dict[str, str]]] | None = None
+        self.skills_cache: tuple[float, list[dict[str, str]]] | None = None
         self.update_cache: tuple[float, dict[str, Any]] | None = None
         self.usage_stats: dict[str, Any] = {
             "turns": 0,
@@ -643,6 +644,52 @@ async def update_model(request: Request, body: ModelUpdate) -> JSONResponse:
     return JSONResponse({"model": config["agy_model"], "effort": config["agy_effort"]})
 
 
+BUILTIN_SLASH_COMMANDS = [
+    {"name": "btw", "desc": "Ask a quick question without interrupting the main conversation.", "kind": "cmd"},
+    {"name": "goal", "desc": "Run until the specified goal is completely finished.", "kind": "cmd"},
+    {"name": "compact", "desc": "Compact the conversation now to free up context.", "kind": "cmd"},
+    {"name": "schedule", "desc": "Run an instruction on a recurring schedule or as a timer.", "kind": "cmd"},
+    {"name": "browser", "desc": "Invoke a browser agent for web tasks.", "kind": "cmd"},
+    {"name": "plan", "desc": "Plan carefully before executing a task.", "kind": "cmd"},
+    {"name": "grill-me", "desc": "Interview me to align on a plan.", "kind": "cmd"},
+    {"name": "teamwork", "desc": "Invoke a team of agents to autonomously tackle large projects.", "kind": "cmd"},
+    {"name": "learn", "desc": "Reflect on recent successes or corrections to capture reusable skills.", "kind": "cmd"},
+    {"name": "boost", "desc": "Invoke the Boost multi-agent orchestrator for complex tasks.", "kind": "cmd"},
+]
+
+
+@app.get("/api/skills")
+async def get_skills(request: Request) -> JSONResponse:
+    verify_request(request)
+    now = time.monotonic()
+    if hub.skills_cache and now < hub.skills_cache[0]:
+        return JSONResponse({"items": hub.skills_cache[1]})
+
+    items = list(BUILTIN_SLASH_COMMANDS)
+    seen = {x["name"] for x in items}
+    skill_roots = [
+        Path.home() / ".gemini" / "antigravity" / "builtin" / "skills",
+        Path.home() / ".gemini" / "antigravity" / "skills",
+    ]
+    for root in skill_roots:
+        if not root.exists():
+            continue
+        for smd in sorted(root.glob("*/SKILL.md"))[:40]:
+            try:
+                head = smd.read_text(encoding="utf-8", errors="replace")[:1500]
+                m_name = re.search(r"^name:\s*(.+)$", head, re.MULTILINE)
+                m_desc = re.search(r"^description:\s*>?-?\s*(.+)$", head, re.MULTILINE)
+                sname = (m_name.group(1).strip().strip('"\'') if m_name else smd.parent.name)
+                sdesc = (m_desc.group(1).strip().strip('"\'') if m_desc else f"Skill: {sname}")[:120]
+                if sname and sname not in seen:
+                    seen.add(sname)
+                    items.append({"name": sname, "desc": sdesc, "kind": "skill"})
+            except Exception:
+                continue
+    hub.skills_cache = (now + 300, items)
+    return JSONResponse({"items": items})
+
+
 class WorkspaceUpdate(BaseModel):
     workspace: str
     agy_mode: str | None = None
@@ -940,12 +987,27 @@ async def ws_chat(websocket: WebSocket) -> None:
                 if not prompt:
                     continue
 
+                open_files = data.get("open_files") or []
+                safe_open: list[str] = []
+                if isinstance(open_files, list):
+                    for fp in open_files[:12]:
+                        if isinstance(fp, str) and fp.strip():
+                            try:
+                                resolve_safe_path(fp.strip())
+                                safe_open.append(fp.strip())
+                            except Exception:
+                                pass
+
+                effective_prompt = prompt
+                if safe_open:
+                    effective_prompt = f"[Open workspace files: {', '.join(safe_open)}]\n\n{prompt}"
+
                 msg_id = f"m_{int(time.time() * 1000)}"
                 is_queued = hub.busy or len(hub.queue) > 0
                 user_msg = {"id": msg_id, "role": "user", "text": prompt, "queued": is_queued}
                 hub.history.append(user_msg)
                 await hub.broadcast({"type": "message", "message": user_msg})
-                q_len = hub.enqueue({"prompt": prompt, "msg_id": msg_id})
+                q_len = hub.enqueue({"prompt": effective_prompt, "msg_id": msg_id})
                 await hub.broadcast({"type": "queue", "count": q_len})
 
     except WebSocketDisconnect:
@@ -1048,6 +1110,16 @@ async def handle_agy_turn(prompt: str, msg_id: str) -> None:
                     if not tools or tools[-1]["name"] != tool_name:
                         tools.append(info)
                         await hub.broadcast({"type": "tool", "tool": info})
+                    raw_su = json.dumps(su, ensure_ascii=False)
+                    ws_real = os.path.realpath(workspace)
+                    for m_path in re.findall(r'"([^"\\]*(?:[\\/][^"\\]+)+)"', raw_su):
+                        try:
+                            cand = os.path.realpath(os.path.join(ws_real, m_path) if not os.path.isabs(m_path) else m_path)
+                            if os.path.commonpath([ws_real, cand]) == ws_real and os.path.isfile(cand):
+                                rel = str(Path(cand).relative_to(ws_real)).replace("\\", "/")
+                                await hub.broadcast({"type": "file_touched", "path": rel})
+                        except Exception:
+                            pass
 
             elif ev_type == "result":
                 res = evt.get("result", {})

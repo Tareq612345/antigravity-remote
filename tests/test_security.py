@@ -111,6 +111,13 @@ class SecurityTestSuite(unittest.TestCase):
         self.assertEqual(self.client.get("/api/check-update", headers=remote_hdr).status_code, 403)
         self.assertEqual(self.client.post("/api/install-agy", headers=remote_hdr).status_code, 403)
 
+    def test_skills_endpoint_returns_commands_and_skills(self) -> None:
+        r = self.client.get("/api/skills", headers=self.hdr)
+        self.assertEqual(r.status_code, 200)
+        names = {x["name"] for x in r.json()["items"]}
+        self.assertIn("plan", names)
+        self.assertIn("boost", names)
+
 
 if __name__ == "__main__":
     unittest.main()

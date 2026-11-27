@@ -131,6 +131,36 @@
       border-top: 1px solid var(--border); padding-top: 10px; font-size: 12px; color: var(--muted);
       display: flex; flex-direction: column; gap: 4px; direction: ltr; text-align: left;
     }
+    .active-files-bar {
+      display: none; gap: 6px; padding: 6px 14px; overflow-x: auto;
+      border-bottom: 1px solid var(--border); background: var(--bg); align-items: center;
+    }
+    .active-files-bar.open { display: flex; }
+    .file-tab {
+      flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px; border-radius: 8px; font-size: 12px;
+      background: var(--surface); border: 1px solid var(--border); color: var(--text);
+      cursor: pointer; direction: ltr;
+    }
+    .file-tab:hover { background: var(--hover); }
+    .file-tab .close-x { color: var(--muted); font-size: 13px; padding: 0 2px; }
+    .file-tab .close-x:hover { color: #fff; }
+    .slash-popover {
+      display: none; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+      width: calc(100% - 28px); max-width: 680px; margin-bottom: 8px;
+      background: #1f1f1f; border: 1px solid var(--border); border-radius: 14px;
+      padding: 6px; box-shadow: 0 12px 32px rgba(0,0,0,0.65); z-index: 45;
+      max-height: 50dvh; overflow-y: auto; flex-direction: column; gap: 2px;
+    }
+    .slash-popover.open { display: flex; }
+    .slash-item {
+      display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+      border-radius: 8px; border: none; background: transparent; color: var(--text);
+      cursor: pointer; text-align: left; direction: ltr; width: 100%;
+    }
+    .slash-item:hover { background: rgba(255,255,255,0.08); }
+    .slash-name { font-size: 13px; font-weight: 600; white-space: nowrap; }
+    .slash-desc { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .composer-inner { max-width: 760px; margin: 0 auto; background: var(--composer); border-radius: 26px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; border: 1px solid rgba(255, 255, 255, 0.08); }
     .attach-bar { display: none; flex-wrap: wrap; gap: 6px; padding: 2px 8px; }
     .attach-bar.open { display: flex; }
@@ -226,6 +256,7 @@
     </header>
 
     <section id="view-chat" class="view active">
+      <div id="activeFilesBar" class="active-files-bar"></div>
       <div id="chatScroll" class="chat-scroll">
         <div class="chat-container">
           <div id="emptyState" class="empty-state">
@@ -235,6 +266,7 @@
         </div>
       </div>
       <div class="composer-wrap">
+        <div id="slashPopover" class="slash-popover"></div>
         <div id="modelPopover" class="model-popover">
           <div style="font-size:12px;color:var(--muted);font-weight:600;">Model</div>
           <div id="modelsList" style="display:flex;flex-direction:column;gap:2px;"></div>
@@ -262,8 +294,9 @@
             <button id="stopBtn" class="send-btn" style="display:none;" onclick="stopTurn()">■</button>
             <button id="sendBtn" class="send-btn" onclick="sendPrompt()">↑</button>
           </div>
-          <div style="display:flex;align-items:center;padding:0 6px 2px;">
-            <button id="modelBtn" class="model-btn" onclick="toggleModelMenu()">⚡ Default Model ⌄</button>
+          <div style="display:flex;align-items:center;gap:4px;padding:0 6px 2px;">
+            <button id="modelBtn" class="model-btn" onclick="toggleModelMenu()">Default Model ⌄</button>
+            <button class="model-btn" title="Commands &amp; Skills" onclick="toggleSlashMenu()">/ Commands</button>
           </div>
         </div>
       </div>
@@ -552,7 +585,9 @@
         } else if (data.type === "tool") {
           ensureLiveBubble();
           liveMetaEl.style.display = "block";
-          liveMetaEl.textContent += `🔧 ${data.tool.name}\n`;
+          liveMetaEl.textContent += `[tool] ${data.tool.name}\n`;
+        } else if (data.type === "file_touched") {
+          addOpenFile(data.path, false);
         } else if (data.type === "token") {
           ensureLiveBubble();
           streamingEl.textContent += data.text;
@@ -601,14 +636,123 @@
         renderAttachments();
       }
       if (!text || !ws || ws.readyState !== 1) return;
-      ws.send(JSON.stringify({ type: "chat", text }));
+      ws.send(JSON.stringify({ type: "chat", text, open_files: openFiles }));
       inp.value = "";
+      document.getElementById("slashPopover").classList.remove("open");
     }
 
     function stopTurn() { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "stop" })); }
     document.getElementById("promptInput").addEventListener("keydown", (e) => {
+      if (e.key === "Escape") document.getElementById("slashPopover").classList.remove("open");
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendPrompt(); }
     });
+    document.getElementById("promptInput").addEventListener("input", (e) => {
+      const val = e.target.value;
+      if (val.startsWith("/")) {
+        const q = val.slice(1).split(/\s/)[0].toLowerCase();
+        renderSlashPopover(q);
+        document.getElementById("slashPopover").classList.add("open");
+      } else {
+        document.getElementById("slashPopover").classList.remove("open");
+      }
+    });
+
+    let openFiles = JSON.parse(localStorage.getItem("ag_open_files") || "[]");
+    let slashItems = [];
+
+    function saveOpenFiles() { localStorage.setItem("ag_open_files", JSON.stringify(openFiles)); }
+
+    function addOpenFile(relPath, save = true) {
+      if (!relPath || openFiles.includes(relPath)) return;
+      openFiles.push(relPath);
+      if (openFiles.length > 10) openFiles.shift();
+      if (save) saveOpenFiles();
+      renderOpenFiles();
+    }
+
+    function removeOpenFile(relPath) {
+      openFiles = openFiles.filter(p => p !== relPath);
+      saveOpenFiles();
+      renderOpenFiles();
+    }
+
+    function renderOpenFiles() {
+      const bar = document.getElementById("activeFilesBar");
+      bar.innerHTML = "";
+      bar.classList.toggle("open", openFiles.length > 0);
+      openFiles.forEach(p => {
+        const tab = document.createElement("div");
+        tab.className = "file-tab";
+        const name = p.split("/").pop();
+        tab.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="opacity:0.7;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span>${name}</span><span class="close-x" title="Close">×</span>`;
+        tab.title = p;
+        tab.querySelector(".close-x").onclick = (ev) => { ev.stopPropagation(); removeOpenFile(p); };
+        tab.onclick = () => openFileFromBar(p);
+        bar.appendChild(tab);
+      });
+    }
+
+    async function openFileFromBar(relPath) {
+      switchView("files");
+      currentPreviewPath = relPath;
+      const prev = document.getElementById("filePreview");
+      const acts = document.getElementById("previewActions");
+      acts.style.display = "flex";
+      document.getElementById("downloadFileBtn").onclick = async () => {
+        const r = await fetch(`${SERVER_URL}/api/download?path=${encodeURIComponent(currentPreviewPath)}`, {
+          headers: { "Authorization": `Bearer ${SB_TOKEN}` }
+        });
+        if (!r.ok) return;
+        const blob = await r.blob();
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = relPath.split("/").pop();
+        a.click();
+        URL.revokeObjectURL(a.href);
+      };
+      try { const f = await api(`/api/file?path=${encodeURIComponent(relPath)}`); prev.style.display = "block"; prev.textContent = f.content; }
+      catch { prev.style.display = "block"; prev.textContent = "(Binary or large file — click Download)"; }
+    }
+
+    async function loadSlashItems() {
+      if (!SERVER_URL) return;
+      try {
+        const data = await api("/api/skills");
+        slashItems = data.items || [];
+      } catch {}
+    }
+
+    function toggleSlashMenu() {
+      const pop = document.getElementById("slashPopover");
+      const opening = !pop.classList.contains("open");
+      if (opening) {
+        renderSlashPopover("");
+        if (!slashItems.length) loadSlashItems().then(() => renderSlashPopover(""));
+      }
+      pop.classList.toggle("open", opening);
+    }
+
+    function renderSlashPopover(query) {
+      const pop = document.getElementById("slashPopover");
+      pop.innerHTML = "";
+      const filtered = slashItems.filter(it => it.name.toLowerCase().includes(query) || it.desc.toLowerCase().includes(query));
+      filtered.forEach(it => {
+        const btn = document.createElement("button");
+        btn.className = "slash-item";
+        const iconSvg = it.kind === "cmd"
+          ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex:0 0 auto;opacity:0.7;"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`
+          : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex:0 0 auto;opacity:0.7;"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`;
+        btn.innerHTML = `${iconSvg}<span class="slash-name">${it.name}</span><span class="slash-desc">${it.desc}</span>`;
+        btn.onclick = () => {
+          const inp = document.getElementById("promptInput");
+          inp.value = `/${it.name} `;
+          pop.classList.remove("open");
+          inp.focus();
+        };
+        pop.appendChild(btn);
+      });
+    }
+    renderOpenFiles();
 
     async function uploadSelectedFiles(files) {
       for (const f of files) {
@@ -712,7 +856,7 @@
       const found = cachedModels.find(m => m.id === mid);
       const label = found ? found.name : (mid || "Default Model");
       const effTxt = eff ? ` · ${eff}` : "";
-      document.getElementById("modelBtn").textContent = `⚡ ${label}${effTxt} ⌄`;
+      document.getElementById("modelBtn").textContent = `${label}${effTxt} ⌄`;
       if (usage) {
         const lines = [`Turns: ${usage.turns || 0} | Total: ${(usage.total_tokens || 0).toLocaleString()} tok`];
         lines.push(`In: ${(usage.input_tokens || 0).toLocaleString()} · Out: ${(usage.output_tokens || 0).toLocaleString()} · Think: ${(usage.thinking_tokens || 0).toLocaleString()}`);
@@ -797,7 +941,26 @@
       data.items.forEach(item => {
         const el = document.createElement("div");
         el.className = "file-row";
-        el.textContent = (item.is_dir ? "📁 " : "📄 ") + item.name;
+        const iconSvg = item.is_dir
+          ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex:0 0 auto;opacity:0.7;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`
+          : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex:0 0 auto;opacity:0.7;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+        const left = document.createElement("div");
+        left.style.cssText = "display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden;";
+        left.innerHTML = `${iconSvg}<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.name}</span>`;
+        el.appendChild(left);
+        if (!item.is_dir) {
+          const pinBtn = document.createElement("button");
+          pinBtn.className = "btn secondary";
+          pinBtn.style.cssText = "padding:4px 10px;font-size:11.5px;";
+          pinBtn.textContent = openFiles.includes(item.path) ? "Pinned" : "Pin";
+          pinBtn.onclick = (ev) => {
+            ev.stopPropagation();
+            if (openFiles.includes(item.path)) removeOpenFile(item.path);
+            else addOpenFile(item.path, true);
+            pinBtn.textContent = openFiles.includes(item.path) ? "Pinned" : "Pin";
+          };
+          el.appendChild(pinBtn);
+        }
         el.onclick = async () => {
           if (item.is_dir) loadFiles(item.path);
           else {
