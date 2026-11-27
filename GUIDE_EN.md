@@ -6,15 +6,15 @@ Control your PC's **Google Antigravity** session directly from your phone in **3
 
 ## Before You Start
 - Windows 10 or Windows 11 PC.
-- **`agy` CLI** installed and signed in on your PC (verify by running `agy` in a terminal once). The app starts `agy` itself for every message, so the CLI has to work on its own. The Antigravity IDE does not need to be open, and no chat session has to be running in it.
+- **`agy` CLI** installed and signed in on your PC (verify by running `agy` in a terminal once). If `agy` is not installed yet, the desktop app offers a one-click **Install `agy` CLI** button on launch. The app starts `agy` itself for every message, so the CLI has to work on its own. The Antigravity IDE does not need to be open, and no chat session has to be running in it.
 
 ---
 
 ## Step 1: Download & Launch on Your PC
-1. Download **`AntigravityRemote.exe`** — release [`0.1`](https://github.com/Tareq612345/antigravity-remote/releases/tag/0.1) (pre-release), 34,532,706 bytes (32.9 MB).
+1. Download **`AntigravityRemote.exe`** — release [`0.1`](https://github.com/Tareq612345/antigravity-remote/releases/tag/0.1) (pre-release), 34,539,291 bytes (32.9 MB).
    - Direct link: <https://github.com/Tareq612345/antigravity-remote/releases/download/0.1/AntigravityRemote.exe>
    - Optional check before running it: in PowerShell, `Get-FileHash .\AntigravityRemote.exe -Algorithm SHA256` must print
-     `96862FD0F74B90002D84CE259E1D4FECFF2945075933981F6A07942F57E2909B`.
+     `D387F9147465E3F53566511A553F5C1C3670B07CF7A1FF137D7678BDEBF4EF55`.
 2. Double-click **`AntigravityRemote.exe`**.
    - On first launch, it automatically downloads and verifies `cloudflared` (takes a few seconds) and opens an encrypted tunnel.
    - Wait until the **Connection & Cloudflare Tunnel** card says **`Online`**.
@@ -33,7 +33,13 @@ Control your PC's **Google Antigravity** session directly from your phone in **3
 ---
 
 ## Quick Tips
-- **Switch Model / Thinking Effort:** Tap the `⚡ Default Model` button below the chat box to pick a model, adjust thinking effort, or view session token usage.
+- **Switch Model / Thinking Effort:** Tap the `Default Model` button below the chat box to pick a model, adjust thinking effort, or view session token usage.
+- **Slash Commands & Skills:** Type `/` in the chat box or tap `/ Commands` to insert built-in slash commands or local Antigravity skills.
+- **Active & Pinned Files:** Files touched by the agent appear automatically in the bar above the chat; tap the pin icon inside **Files** to pin any file for quick preview.
 - **Send Images / Files:** Tap `＋` in the chat box to upload files safely to `_uploads/` inside your workspace.
 - **Change Language:** Go to **Settings -> Language** to switch between **English** and **العربية**.
 - **Keep PC Awake:** The app keeps your PC awake for 7 hours (while allowing the monitor to turn off) and resets the timer on every message.
+
+---
+
+For complete technical details, troubleshooting, and self-hosting instructions, see the [Full Reference Guide](docs/GUIDE.en.md).

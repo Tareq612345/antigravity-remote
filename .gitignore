@@ -11,5 +11,7 @@ audit.log
 _remote_uploads/
 build/
 dist/
+dist_v*/
+_uploads/
 *.spec
 *.pyc

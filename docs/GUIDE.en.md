@@ -45,8 +45,10 @@ A complete, step-by-step guide to running **Antigravity Remote** on your PC and 
 
 ### Option A — prebuilt executable
 
-1. Install and sign in to the **`agy` CLI** on the PC.
-2. Run **`AntigravityRemote.exe`**. On first launch it downloads `cloudflared.exe` (pinned version, SHA256-verified) into `%USERPROFILE%\.antigravity-remote\`.
+1. Download **`AntigravityRemote.exe`** from [GitHub Releases](https://github.com/Tareq612345/antigravity-remote/releases) and run it.
+2. On first launch it downloads `cloudflared.exe` (pinned version, SHA256-verified) into `%USERPROFILE%\.antigravity-remote\`.
+3. If the **`agy` CLI** is not installed yet, the desktop control panel shows a built-in one-click **Install `agy` CLI** button.
+4. The control panel automatically checks GitHub Releases on launch and notifies you when a newer version is available.
 
 ### Option B — run from source
 
@@ -98,21 +100,17 @@ uvicorn server:app --host 127.0.0.1 --port 8765 --no-access-log
 
 ### `start_server.bat`
 
-The included batch file starts the headless server from a virtual environment:
+The included batch file starts the headless server from a virtual environment relative to its own folder:
 
 ```bat
 @echo off
-cd /d "C:\Projects\antigravity-remote"
+cd /d "%~dp0"
 ".venv\Scripts\python.exe" -m uvicorn server:app --host 127.0.0.1 --port 8765 --no-access-log
 ```
 
-> **Edit the path first.** It assumes the project lives in `C:\Projects\antigravity-remote`. Change both lines to your own folder.
-
 ### Start automatically at logon (optional)
 
-Run `setup_autostart.ps1` **once, as Administrator**. It registers a scheduled task named `AntigravityRemoteServer` that runs `start_server.bat` at logon.
-
-> The script also hardcodes `C:\Projects\antigravity-remote` — edit it if your path is different.
+Run `setup_autostart.ps1` **once**. It registers a scheduled task named `AntigravityRemoteServer` using `$PSScriptRoot` (no hardcoded paths and no Administrator privileges required) that runs `start_server.bat` at logon.
 
 The server binds to `127.0.0.1` only. Nothing on your Wi-Fi can reach it directly; remote access happens exclusively through the Cloudflare tunnel.
 
@@ -140,7 +138,7 @@ The control panel shows **Linked to: your@email** once pairing succeeds.
 
 ## 5. Sign in from your phone
 
-1. Open the web client: **https://tareq612345.github.io/antigravity-remote/**
+1. Open the web client: **https://antigravity-remote-8fi.pages.dev/**
 2. Tap **Sign in with Google** and use the **same account** you paired with.
 3. The app looks up your device row, gets the tunnel URL, and connects.
 
@@ -151,6 +149,8 @@ From there you can:
 - Send prompts and queue follow-ups while the agent is working
 - Stop a running turn
 - Browse the workspace, download files, upload files
+- View the **Active & Pinned Files** bar above the chat (tracks files touched by the agent and pins favorites for one-tap preview)
+- Use the **`/` Slash Commands & Skills** menu to insert built-in commands or local Antigravity skills
 - Switch model and thinking effort
 - See session usage
 - Extend the sleep timer
@@ -280,8 +280,8 @@ The desktop app uses `pywebview` with the Edge WebView2 runtime. Install the Web
 2. Run [`supabase_schema.sql`](../supabase_schema.sql) in the SQL Editor — it creates `public.remote_devices` with RLS enabled and per-user policies.
 3. Enable **Google** under Authentication → Providers.
 4. Put your project URL and anon key into [`tunnel_and_auth.py`](../tunnel_and_auth.py) and [`docs/index.html`](index.html).
-5. Update `DEFAULT_ALLOWED_ORIGINS` in `server.py` if your Pages site uses a different origin.
-6. Fork the repo, enable **GitHub Pages** serving from `/docs`, and open your own Pages URL on the phone.
+5. Update `DEFAULT_ALLOWED_ORIGINS` in `server.py` if your hosted site uses a different origin.
+6. Fork the repo and deploy `/docs` on **Cloudflare Pages** (recommended) or **GitHub Pages**, then open your own deployed URL on the phone.
 
 The Supabase anon key is designed to be public; your data is protected by the RLS policies, not by hiding the key.
 

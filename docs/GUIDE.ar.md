@@ -45,8 +45,10 @@
 
 ### الخيار الأول — نسخة جاهزة (exe)
 
-1. ثبّت وسجّل الدخول في أداة **`agy`** على الجهاز.
-2. شغّل **`AntigravityRemote.exe`**. عند أول تشغيل سينزّل `cloudflared.exe` (نسخة محددة مع التحقق من SHA256) إلى المجلد `%USERPROFILE%\.antigravity-remote\`.
+1. حمّل ملف **`AntigravityRemote.exe`** من [صفحة الإصدارات على GitHub](https://github.com/Tareq612345/antigravity-remote/releases) وشغّله.
+2. عند أول تشغيل سينزّل `cloudflared.exe` (نسخة محددة مع التحقق من SHA256) إلى المجلد `%USERPROFILE%\.antigravity-remote\`.
+3. إذا لم تكن أداة **`agy` CLI** مثبّتة بعد، ستظهر لك في لوحة التحكم بطاقة فيها زر لتثبيتها بضغطة واحدة.
+4. تفحص لوحة التحكم إصدارات GitHub تلقائيًا عند التشغيل وتُعلمك عند توفر إصدار جديد.
 
 ### الخيار الثاني — تشغيل من الكود المصدري
 
@@ -99,17 +101,13 @@ uvicorn server:app --host 127.0.0.1 --port 8765 --no-access-log
 
 ```bat
 @echo off
-cd /d "C:\Projects\antigravity-remote"
+cd /d "%~dp0"
 ".venv\Scripts\python.exe" -m uvicorn server:app --host 127.0.0.1 --port 8765 --no-access-log
 ```
 
-> **عدّل المسار أولًا.** الملف يفترض أن المشروع في `C:\Projects\antigravity-remote`. غيّر السطرين لمكان مشروعك.
-
 ### تشغيل تلقائي عند تسجيل الدخول (اختياري)
 
-شغّل `setup_autostart.ps1` **مرة واحدة كمسؤول (Administrator)**. ينشئ مهمة مجدولة باسم `AntigravityRemoteServer` تشغّل `start_server.bat` عند تسجيل الدخول.
-
-> السكربت أيضًا يفترض المسار `C:\Projects\antigravity-remote` — عدّله لو مختلفًا.
+شغّل `setup_autostart.ps1` **مرة واحدة**. ينشئ مهمة مجدولة باسم `AntigravityRemoteServer` بالاعتماد على `$PSScriptRoot` (بدون مسار ثابت وبدون الحاجة لصلاحيات المسؤول Administrator) لتشغيل `start_server.bat` عند تسجيل الدخول.
 
 السيرفر يستمع على `127.0.0.1` فقط. لا شيء على نفس شبكة الواي فاي يستطيع الوصول إليه مباشرة، والوصول من الخارج يمر فقط عبر نفق Cloudflare.
 
@@ -137,7 +135,7 @@ cd /d "C:\Projects\antigravity-remote"
 
 ## 5. تسجيل الدخول من الموبايل
 
-1. افتح صفحة الويب: **https://tareq612345.github.io/antigravity-remote/**
+1. افتح صفحة الويب: **https://antigravity-remote-8fi.pages.dev/**
 2. اضغط **Sign in with Google** واستخدم **نفس الحساب** الذي ربطت به الجهاز.
 3. التطبيق يقرأ بيانات جهازك من Supabase، يحصل على رابط النفق، ثم يتصل.
 
@@ -148,6 +146,8 @@ cd /d "C:\Projects\antigravity-remote"
 - إرسال الأوامر ووضع أوامر إضافية في الطابور أثناء عمل الوكيل
 - إيقاف أي دور جارٍ
 - تصفح مجلد العمل وتنزيل الملفات ورفع ملفات
+- متابعة شريط **الملفات النشطة والمثبتة** أعلى المحادثة وتثبيت الملفات المهمة للوصول السريع
+- استخدام قائمة **الأوامر والمهارات (`/`)** لإدراج أوامر سلاش الجاهزة أو مهارات Antigravity المحلية
 - تغيير الموديل ومستوى التفكير
 - رؤية استهلاك الجلسة
 - تمديد مؤقت إبقاء الجهاز مستيقظًا
@@ -278,7 +278,7 @@ cd /d "C:\Projects\antigravity-remote"
 3. فعّل **Google** من Authentication ← Providers.
 4. ضع رابط مشروعك والمفتاح العام (anon key) في [`tunnel_and_auth.py`](../tunnel_and_auth.py) و[`docs/index.html`](index.html).
 5. عدّل `DEFAULT_ALLOWED_ORIGINS` في `server.py` لو صفحتك على نطاق مختلف.
-6. اعمل Fork للمستودع، وفعّل **GitHub Pages** من مجلد `/docs`، وافتح رابط صفحتك من الموبايل.
+6. اعمل Fork للمستودع، وانشر مجلد `/docs` على **Cloudflare Pages** (الموصى به) أو **GitHub Pages**، وافتح رابط صفحتك من الموبايل.
 
 مفتاح Supabase العام (anon key) مصمم ليكون علنيًا، وحماية بياناتك تأتي من سياسات RLS وليس من إخفاء المفتاح.
 

@@ -17,8 +17,8 @@
    - Behind Cloudflare Tunnel (`127.0.0.1`), HTTP and WebSocket rate limiters key on `cf-connecting-ip` with separate buckets for normal API traffic and failed authentication attempts.
    - Concurrent WebSocket connections are capped (`MAX_WS_CLIENTS = 10`).
    - `cloudflared.exe` downloads are pinned to a specific release version and verified against a hardcoded `SHA256` hash before execution.
-5. **Uploads Outside Workspace:**
-   - Uploaded files are stored in `%USERPROFILE%\.antigravity-remote\uploads` (outside the project workspace) and restricted to non-executable data/media extensions (`<= 10 MB`).
+5. **Safe Workspace Uploads (`_uploads/`):**
+   - Uploaded files are saved into `<workspace>\_uploads\` with sanitized filenames, restricted to non-executable data/media extensions (`.txt`, `.md`, `.json`, `.csv`, `.log`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.mp3`, `.wav`, `.m4a`, `.ogg`, `.pdf`), capped at `10 MB`, and path-validated against workspace traversal.
 
 ## Reporting a Vulnerability
 If you discover a security vulnerability in this repository:
