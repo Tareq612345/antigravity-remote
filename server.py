@@ -4,6 +4,7 @@ import os
 import re
 import secrets
 import socket
+import subprocess
 import sys
 import time
 from collections import defaultdict, deque
@@ -34,8 +35,10 @@ AGY_CONVERSATIONS_DIR = Path.home() / ".gemini" / "antigravity-cli" / "conversat
 DEFAULT_AGY_PATH = str(Path.home() / ".gemini" / "bin" / "agy.exe")
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+MAX_WS_CLIENTS = 10
+UPLOADS_DIR = DATA_DIR / "uploads"
 ALLOWED_UPLOAD_EXTS = {
-    ".txt", ".md", ".py", ".js", ".ts", ".json", ".csv", ".log",
+    ".txt", ".md", ".json", ".csv", ".log",
     ".png", ".jpg", ".jpeg", ".webp", ".gif",
     ".mp3", ".wav", ".m4a", ".ogg", ".pdf",
 }
@@ -46,12 +49,33 @@ DEFAULT_ALLOWED_ORIGINS = [
 ]
 
 
+def restrict_file_permissions(path: Path) -> None:
+    try:
+        if os.name == "nt":
+            user = os.environ.get("USERNAME") or ""
+            if user:
+                subprocess.run(
+                    ["icacls", str(path), "/inheritance:r", "/grant:r", f"{user}:F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+                    check=False,
+                )
+        else:
+            os.chmod(path, 0o600)
+    except Exception:
+        pass
+
+
 def audit_log(event: str, detail: str = "") -> None:
     try:
+        is_new = not AUDIT_LOG_PATH.exists()
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         line = f"[{ts}] {event}: {detail}\n"
         with AUDIT_LOG_PATH.open("a", encoding="utf-8") as f:
             f.write(line)
+        if is_new:
+            restrict_file_permissions(AUDIT_LOG_PATH)
     except Exception:
         pass
 
@@ -84,6 +108,7 @@ def load_or_create_config() -> dict[str, Any]:
 
 def save_config(cfg: dict[str, Any]) -> None:
     CONFIG_PATH.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+    restrict_file_permissions(CONFIG_PATH)
 
 
 def load_chats_store() -> dict[str, Any]:
@@ -97,6 +122,7 @@ def load_chats_store() -> dict[str, Any]:
 
 def save_chats_store(store: dict[str, Any]) -> None:
     CHATS_PATH.write_text(json.dumps(store, indent=2, ensure_ascii=False), encoding="utf-8")
+    restrict_file_permissions(CHATS_PATH)
 
 
 config = load_or_create_config()
@@ -144,18 +170,22 @@ class HubState:
         self.ide_mirror_id: str | None = None
         self.pairing_codes: dict[str, float] = {}
 
-    def issue_pairing_code(self) -> str:
+    def issue_pairing_code(self) -> tuple[str, str]:
         now = time.monotonic()
-        self.pairing_codes = {k: exp for k, exp in self.pairing_codes.items() if exp > now}
+        self.pairing_codes = {k: v for k, v in self.pairing_codes.items() if v[1] > now}
         code = secrets.token_urlsafe(18)
-        self.pairing_codes[code] = now + 300  # 5 minutes
-        return code
+        cookie_secret = secrets.token_urlsafe(18)
+        self.pairing_codes[code] = (cookie_secret, now + 300)  # 5 minutes
+        return code, cookie_secret
 
-    def consume_pairing_code(self, code: str | None) -> bool:
-        if not code:
+    def consume_pairing_code(self, code: str | None, cookie_secret: str | None) -> bool:
+        if not code or not cookie_secret:
             return False
-        exp = self.pairing_codes.pop(code, None)
-        return bool(exp and exp > time.monotonic())
+        entry = self.pairing_codes.pop(code, None)
+        if not entry:
+            return False
+        expected_cookie, exp = entry
+        return exp > time.monotonic() and secrets.compare_digest(cookie_secret, expected_cookie)
 
     async def broadcast(self, payload: dict[str, Any]) -> None:
         dead: list[WebSocket] = []
@@ -257,7 +287,12 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 def client_ip(request: Request) -> str:
-    return (request.client.host if request.client else "") or "unknown"
+    peer = (request.client.host if request.client else "") or "unknown"
+    if peer in ("127.0.0.1", "::1", "localhost"):
+        cf_ip = (request.headers.get("cf-connecting-ip") or "").strip()
+        if cf_ip:
+            return cf_ip
+    return peer
 
 
 def is_local_client(request: Request) -> bool:
@@ -310,7 +345,7 @@ async def desktop_ui() -> FileResponse:
 async def pc_login_page(request: Request) -> HTMLResponse:
     if not is_local_client(request):
         raise HTTPException(status_code=403, detail="PC pairing is only allowed from localhost")
-    pair_code = hub.issue_pairing_code()
+    pair_code, cookie_secret = hub.issue_pairing_code()
     html = f"""<!DOCTYPE html><html lang="en" dir="ltr"><head><meta charset="utf-8"><title>Link PC — Antigravity Remote</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
@@ -319,6 +354,7 @@ async def pc_login_page(request: Request) -> HTMLResponse:
       .spinner{{width:28px;height:28px;border:3px solid rgba(255,255,255,.15);border-top-color:#10a37f;border-radius:50%;animation:spin .8s linear infinite;display:none;}}
       @keyframes spin{{to{{transform:rotate(360deg)}}}}
       .btn{{padding:10px 20px;border-radius:10px;border:0;background:#fff;color:#000;font-weight:600;cursor:pointer;font-size:14px;}}
+      .btn.ok{{background:#10a37f;color:#fff;}}
       .link-btn{{background:transparent;border:1px solid rgba(255,255,255,.15);color:#9b9b9b;padding:7px 14px;border-radius:8px;cursor:pointer;font-size:12.5px;}}
       .link-btn:hover{{color:#fff;border-color:rgba(255,255,255,.35);}}
     </style></head>
@@ -328,6 +364,7 @@ async def pc_login_page(request: Request) -> HTMLResponse:
       <div id="spinner" class="spinner"></div>
       <p id="msg" style="color:#9b9b9b;font-size:13.5px;margin:0;line-height:1.5;">Sign in with the same Google account you use on your mobile browser.</p>
       <button id="loginBtn" class="btn" onclick="loginGoogle()">Sign in with Google</button>
+      <button id="confirmBtn" class="btn ok" style="display:none;" onclick="confirmLink()">Confirm &amp; Link This PC</button>
       <div style="width:100%;border-top:1px solid rgba(255,255,255,.08);padding-top:12px;display:none;" id="footerActions">
         <button class="link-btn" onclick="switchAccount()">Switch Account / Sign Out</button>
       </div>
@@ -335,6 +372,7 @@ async def pc_login_page(request: Request) -> HTMLResponse:
     <script>
       const PAIR_CODE = "{pair_code}";
       const sb = supabase.createClient("{SUPABASE_URL}", "{SUPABASE_ANON_KEY}");
+      let currentSession = null;
       const setBusy = (on, text) => {{
         document.getElementById('spinner').style.display = on ? 'block' : 'none';
         if (text) document.getElementById('msg').textContent = text;
@@ -344,6 +382,23 @@ async def pc_login_page(request: Request) -> HTMLResponse:
         setBusy(true, 'Redirecting to Google Sign-In...');
         await sb.auth.signInWithOAuth({{ provider: 'google', options: {{ redirectTo: window.location.origin + '/pc-login' }} }});
       }}
+      async function confirmLink() {{
+        if (!currentSession) return;
+        document.getElementById('confirmBtn').style.display = 'none';
+        setBusy(true, 'Linking PC to ' + currentSession.user.email + '...');
+        const r = await fetch('/api/pc-link', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ pair_code: PAIR_CODE, access_token: currentSession.access_token, refresh_token: currentSession.refresh_token }})
+        }});
+        if (r.ok) {{
+          setBusy(false, '✅ PC linked successfully to ' + currentSession.user.email + '. You can close this tab.');
+          document.getElementById('title').textContent = 'PC Connected';
+        }} else {{
+          setBusy(false, 'Failed to link PC. Please refresh and try again.');
+          document.getElementById('confirmBtn').style.display = 'inline-block';
+        }}
+      }}
       async function switchAccount() {{
         setBusy(true, 'Signing out...');
         await sb.auth.signOut();
@@ -352,25 +407,17 @@ async def pc_login_page(request: Request) -> HTMLResponse:
       (async () => {{
         const {{ data: {{ session }} }} = await sb.auth.getSession();
         if (session) {{
+          currentSession = session;
           document.getElementById('loginBtn').style.display = 'none';
-          setBusy(true, 'Verifying account ' + session.user.email + '...');
-          const r = await fetch('/api/pc-link', {{
-            method: 'POST',
-            headers: {{ 'Content-Type': 'application/json' }},
-            body: JSON.stringify({{ pair_code: PAIR_CODE, access_token: session.access_token, refresh_token: session.refresh_token }})
-          }});
-          if (r.ok) {{
-            setBusy(false, '✅ PC linked successfully to ' + session.user.email + '. You can close this tab.');
-            document.getElementById('title').textContent = 'PC Connected';
-            document.getElementById('footerActions').style.display = 'block';
-          }} else {{
-            setBusy(false, 'Failed to link PC. Please refresh and try again.');
-            document.getElementById('loginBtn').style.display = 'inline-block';
-          }}
+          document.getElementById('confirmBtn').style.display = 'inline-block';
+          document.getElementById('footerActions').style.display = 'block';
+          setBusy(false, 'Signed in as ' + session.user.email + '. Click Confirm to link this PC.');
         }}
       }})();
     </script></body></html>"""
-    return HTMLResponse(html)
+    resp = HTMLResponse(html)
+    resp.set_cookie(key="ag_pair", value=cookie_secret, httponly=True, samesite="strict", max_age=300)
+    return resp
 
 
 class PcLinkBody(BaseModel):
@@ -386,7 +433,8 @@ async def pc_link(request: Request, body: PcLinkBody) -> JSONResponse:
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
     if not is_local_client(request):
         raise HTTPException(status_code=403, detail="PC pairing is only allowed from localhost")
-    if not hub.consume_pairing_code(body.pair_code):
+    cookie_secret = request.cookies.get("ag_pair")
+    if not hub.consume_pairing_code(body.pair_code, cookie_secret):
         audit_log("pc_link_failed", "invalid_or_expired_pair_code")
         raise HTTPException(status_code=401, detail="Invalid or expired pairing code")
 
@@ -399,29 +447,42 @@ async def pc_link(request: Request, body: PcLinkBody) -> JSONResponse:
     save_config(config)
     synced = sync_tunnel_to_supabase()
     audit_log("pc_link_success", f"email={user['email']} synced={synced}")
-    return JSONResponse({"email": user["email"], "synced": synced})
+    resp = JSONResponse({"email": user["email"], "synced": synced})
+    resp.delete_cookie("ag_pair")
+    return resp
+
+
+@app.post("/api/logout")
+async def api_logout(request: Request) -> JSONResponse:
+    verify_request(request)
+    auth_hdr = request.headers.get("authorization") or ""
+    bearer = auth_hdr[7:].strip() if auth_hdr.lower().startswith("bearer ") else None
+    sb_tok = request.headers.get("x-supabase-token") or bearer
+    sb_auth.invalidate(sb_tok)
+    audit_log("client_logout", f"ip={client_ip(request)}")
+    return JSONResponse({"ok": True})
 
 
 @app.get("/api/status")
 async def get_status(request: Request) -> JSONResponse:
     verify_request(request)
     st = sleep_manager.status()
-    return JSONResponse(
-        {
-            "workspace": config["workspace"],
-            "agy_mode": config.get("agy_mode", "plan"),
-            "owner_email": config.get("owner_email"),
-            "tunnel_url": tunnel_manager.public_url,
-            "busy": hub.busy,
-            "queue_count": len(hub.queue),
-            "sleep": {
-                "active": st.active,
-                "keep_display_on": st.keep_display_on,
-                "remaining_seconds": st.remaining_seconds,
-                "timeout_seconds": st.timeout_seconds,
-            },
-        }
-    )
+    payload: dict[str, Any] = {
+        "agy_mode": config.get("agy_mode", "accept-edits"),
+        "busy": hub.busy,
+        "queue_count": len(hub.queue),
+        "sleep": {
+            "active": st.active,
+            "keep_display_on": st.keep_display_on,
+            "remaining_seconds": st.remaining_seconds,
+            "timeout_seconds": st.timeout_seconds,
+        },
+    }
+    if is_local_client(request):
+        payload["workspace"] = config["workspace"]
+        payload["owner_email"] = config.get("owner_email")
+        payload["tunnel_url"] = tunnel_manager.public_url
+    return JSONResponse(payload)
 
 
 class WorkspaceUpdate(BaseModel):
@@ -636,16 +697,18 @@ async def upload_file(request: Request, file: UploadFile = File(...)) -> JSONRes
 
     safe_stem = re.sub(r"[^a-zA-Z0-9._-]", "_", Path(raw_name).stem)[:64] or "file"
     safe_name = f"{safe_stem}_{int(time.time())}{ext}"
-    uploads_dir = resolve_safe_path("_remote_uploads")
-    uploads_dir.mkdir(parents=True, exist_ok=True)
-    dest = resolve_safe_path(f"_remote_uploads/{safe_name}")
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    uploads_real = os.path.realpath(UPLOADS_DIR)
+    dest_real = os.path.realpath(os.path.join(uploads_real, safe_name))
+    if os.path.commonpath([uploads_real, dest_real]) != uploads_real:
+        raise HTTPException(status_code=403, detail="Invalid upload path")
+    dest = Path(dest_real)
     dest.write_bytes(data)
     audit_log("file_upload", f"name={safe_name} bytes={len(data)}")
     return JSONResponse(
         {
             "filename": safe_name,
             "path": str(dest),
-            "rel_path": f"_remote_uploads/{safe_name}",
             "size": len(data),
         }
     )
@@ -653,17 +716,28 @@ async def upload_file(request: Request, file: UploadFile = File(...)) -> JSONRes
 
 @app.websocket("/ws/chat")
 async def ws_chat(websocket: WebSocket) -> None:
+    if len(hub.clients) >= MAX_WS_CLIENTS:
+        await websocket.close(code=4008)
+        return
     await websocket.accept()
-    ip = websocket.client.host if websocket.client else "unknown"
+    peer = (websocket.client.host if websocket.client else "") or "unknown"
+    ip = (websocket.headers.get("cf-connecting-ip") or "").strip() if peer in ("127.0.0.1", "::1", "localhost") else peer
+    ip = ip or peer
     try:
         auth_raw = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
         auth_msg = json.loads(auth_raw)
         if auth_msg.get("type") != "auth" or not check_credentials(auth_msg.get("token"), auth_msg.get("sb_token")):
+            auth_limiter.check(f"ws_fail:{ip}")
             audit_log("ws_auth_failure", f"ip={ip}")
             await websocket.close(code=4001)
             return
     except Exception:
+        auth_limiter.check(f"ws_fail:{ip}")
         await websocket.close(code=4001)
+        return
+
+    if not auth_limiter.check(f"ws_ok:{ip}"):
+        await websocket.close(code=4029)
         return
 
     hub.clients.add(websocket)

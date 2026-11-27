@@ -1,0 +1,9 @@
+fastapi==0.165.0
+uvicorn==0.54.0
+websockets==17.4
+requests==2.34.2
+pydantic==2.14.4
+python-multipart==0.0.34
+pywebview==6.2.1
+pystray==0.19.5
+pillow==13.0.0

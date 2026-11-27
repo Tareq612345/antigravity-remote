@@ -1,3 +1,4 @@
+import hashlib
 import os
 import re
 import shutil
@@ -8,6 +9,12 @@ from pathlib import Path
 from typing import Any
 
 import requests
+
+CLOUDFLARED_VERSION = "2026.11.2"
+CLOUDFLARED_URL = (
+    f"https://github.com/cloudflare/cloudflared/releases/download/{CLOUDFLARED_VERSION}/cloudflared-windows-amd64.exe"
+)
+CLOUDFLARED_SHA256 = "555b46c85582461d189cac30d14ad05480d612613801be9f110b8ce08c5b2113"
 
 SUPABASE_URL = "https://jpivlsdeiompylybbgyg.supabase.co"
 SUPABASE_ANON_KEY = (
@@ -35,23 +42,43 @@ def find_cloudflared(data_dir: Path | None = None) -> str | None:
     return None
 
 
+def verify_sha256(path: Path, expected_hex: str) -> bool:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 256), b""):
+            h.update(chunk)
+    return h.hexdigest().lower() == expected_hex.lower()
+
+
 def ensure_cloudflared(data_dir: Path) -> str | None:
     exe = find_cloudflared(data_dir)
     if exe:
-        return exe
+        p = Path(exe)
+        # Verify hash for self-downloaded binary in data_dir
+        if p.parent.resolve() == data_dir.resolve() and not verify_sha256(p, CLOUDFLARED_SHA256):
+            print("[Tunnel] cloudflared SHA256 mismatch; removing untrusted binary.")
+            p.unlink(missing_ok=True)
+        else:
+            return exe
+
     dest = data_dir / "cloudflared.exe"
-    url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
+    tmp = data_dir / "cloudflared.exe.tmp"
     try:
-        print("[Tunnel] Downloading cloudflared...")
-        with requests.get(url, stream=True, timeout=60) as r:
+        print(f"[Tunnel] Downloading cloudflared {CLOUDFLARED_VERSION}...")
+        with requests.get(CLOUDFLARED_URL, stream=True, timeout=60) as r:
             r.raise_for_status()
-            with dest.open("wb") as f:
+            with tmp.open("wb") as f:
                 for chunk in r.iter_content(chunk_size=1024 * 128):
                     if chunk:
                         f.write(chunk)
+        if not verify_sha256(tmp, CLOUDFLARED_SHA256):
+            tmp.unlink(missing_ok=True)
+            raise ValueError("Downloaded cloudflared SHA256 verification failed")
+        tmp.replace(dest)
         return str(dest)
     except Exception as exc:
-        print(f"[Tunnel] Failed to download cloudflared: {exc}")
+        tmp.unlink(missing_ok=True)
+        print(f"[Tunnel] Failed to download/verify cloudflared: {exc}")
         return None
 
 
@@ -138,11 +165,15 @@ class SupabaseAuthClient:
             )
             if r.status_code == 200:
                 user = r.json()
-                self._cache[access_token] = (now + 300, user)
+                self._cache[access_token] = (now + 45, user)
                 return user
         except Exception:
             pass
         return None
+
+    def invalidate(self, access_token: str | None) -> None:
+        if access_token:
+            self._cache.pop(access_token, None)
 
     def refresh_session(self, refresh_token: str) -> dict[str, Any] | None:
         try:

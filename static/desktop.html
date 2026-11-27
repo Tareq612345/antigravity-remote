@@ -128,9 +128,17 @@
       }
     };
     let lang = localStorage.getItem("ag_lang") || "en";
-    const urlParams = new URLSearchParams(location.search);
-    const TOKEN = urlParams.get("token") || "";
+    let TOKEN = sessionStorage.getItem("ag_token") || "";
     let keepDisplayOn = false;
+
+    async function initToken() {
+      if (!TOKEN && window.pywebview && window.pywebview.api && window.pywebview.api.get_token) {
+        TOKEN = await window.pywebview.api.get_token();
+        sessionStorage.setItem("ag_token", TOKEN);
+      }
+      refresh();
+    }
+    window.addEventListener("pywebviewready", initToken);
 
     function setLang(l) {
       lang = l;
@@ -177,7 +185,7 @@
 
         document.getElementById("tunnelBadge").textContent = st.tunnel_url ? "Online" : "Connecting...";
         document.getElementById("tunnelUrl").textContent = st.tunnel_url || "Waiting for Cloudflare Tunnel...";
-        if (document.activeElement !== document.getElementById("workspaceInput")) {
+        if (st.workspace && document.activeElement !== document.getElementById("workspaceInput")) {
           document.getElementById("workspaceInput").value = st.workspace;
         }
         document.getElementById("modeSelect").value = st.agy_mode || "accept-edits";
@@ -212,10 +220,11 @@
     }
 
     function openLocalChat() {
-      openExternal(`http://127.0.0.1:8765/?token=${encodeURIComponent(TOKEN)}`);
+      openExternal("http://127.0.0.1:8765/");
     }
 
     setLang(lang);
+    initToken();
     setInterval(refresh, 4000);
   </script>
 </body>

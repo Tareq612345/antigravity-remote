@@ -347,6 +347,14 @@
 
     async function logout() {
       setAuthBusy(true, lang === "ar" ? "جاري تسجيل الخروج..." : "Signing out...");
+      if (SERVER_URL && SB_TOKEN) {
+        try {
+          await fetch(`${SERVER_URL}/api/logout`, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${SB_TOKEN}` }
+          });
+        } catch {}
+      }
       await sb.auth.signOut();
       location.reload();
     }
@@ -586,7 +594,7 @@
         document.getElementById("sleepPill").textContent = txt;
         document.getElementById("sleepSideText").textContent = txt;
         document.getElementById("sleepStateText").textContent = `${txt} | Screen: ${keepDisplayOn ? "On" : "Off OK"}`;
-        document.getElementById("workspaceInput").value = st.workspace;
+        if (st.workspace) document.getElementById("workspaceInput").value = st.workspace;
         document.getElementById("modeSelect").value = st.agy_mode || "accept-edits";
       } catch {}
     }

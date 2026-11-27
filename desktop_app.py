@@ -15,6 +15,9 @@ class DesktopBridge:
     def open_url(self, url: str) -> None:
         webbrowser.open(url)
 
+    def get_token(self) -> str:
+        return server.config["token"]
+
 
 def create_tray_icon_image() -> Image.Image:
     icon_path = server.STATIC_DIR / "app.png"
@@ -39,8 +42,7 @@ def main() -> None:
     time.sleep(0.8)
 
     port = int(server.config.get("port", 8765))
-    token = server.config["token"]
-    desktop_url = f"http://127.0.0.1:{port}/desktop?token={token}"
+    desktop_url = f"http://127.0.0.1:{port}/desktop"
 
     bridge = DesktopBridge()
     window = webview.create_window(
