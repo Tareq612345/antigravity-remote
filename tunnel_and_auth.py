@@ -128,14 +128,32 @@ class TunnelManager:
             if m and not self.public_url:
                 self.public_url = m.group(0)
                 print(f"[Tunnel] Public URL detected: {self.public_url}")
-            if self.public_url and "Registered tunnel connection" in line:
-                print(f"[Tunnel] Edge connection registered: {self.public_url}")
                 if on_url_ready:
-                    try:
-                        on_url_ready(self.public_url)
-                    except Exception as exc:
-                        print(f"[Tunnel] Callback error: {exc}")
+                    threading.Thread(
+                        target=self._wait_and_notify,
+                        args=(self.public_url, on_url_ready),
+                        daemon=True,
+                    ).start()
                     on_url_ready = None
+
+    def _wait_and_notify(self, url: str, callback) -> None:
+        for _ in range(15):
+            if self._stop_event.is_set():
+                return
+            try:
+                r = requests.get(f"{url}/", timeout=5)
+                if r.status_code == 200:
+                    print(f"[Tunnel] Verified live (200 OK): {url}")
+                    callback(url)
+                    return
+            except Exception:
+                pass
+            time.sleep(1.5)
+        # Fallback: notify anyway after wait
+        try:
+            callback(url)
+        except Exception as exc:
+            print(f"[Tunnel] Callback error: {exc}")
 
 
 class SupabaseAuthClient:
